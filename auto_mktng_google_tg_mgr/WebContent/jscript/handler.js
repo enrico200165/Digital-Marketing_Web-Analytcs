@@ -22,10 +22,10 @@ function buildPath(e)  {
 
 
 function genericClickHandler(evt) {	    	
-    msg("enrico click by a " + event.target.nodeName + " element.");
+    // msg("enrico click by a " + event.target.nodeName + " element.");
 	evt.preventDefault(); // try to prevent navigating away    	    	
 	target = evt.target;
-	msg("event target: element"+target +" ID="+target.id+" class ="+target.class);
+	//msg("event target: element"+target +" ID="+target.id+" class ="+target.class);
 	clickMatches(target,selsMustTrap,true);	
     return false;    		
 }

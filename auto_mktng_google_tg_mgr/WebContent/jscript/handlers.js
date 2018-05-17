@@ -10,11 +10,19 @@ function clickMatches(el, sels, dump = true) {
 		else 
 			escSel = jQuery.escapeSelector(sels[i]);
 
+		//descs = jQuery("#div01").find(el);
+		descs = jQuery(escSel).find(el);
+		if (descs.length > 0) {
+			if (jQuery(escSel)[0] && jQuery(escSel).is(el)) {
+				msg("element: " + el+" is itself $("+sels[i]+")")				
+			} else {
+				msg("element: " + el+" is descendants of $("+sels[i]+")")
+			}
+		}
+
 		
-		selecteds = jQuery(escSel); 
-		
-		
-		// IS() : does NOT catch descendands, exact 
+/*		
+		// IS() : does NOT catch descendands, exact
 		if (jQuery(escSel).is(el)) {
 			console.log("selector: "+escSel+" is '"+el.id+"'");
 		}
@@ -22,15 +30,14 @@ function clickMatches(el, sels, dump = true) {
 			console.log("selector: "+escSel+" is '"+el.id+"'");
 		}
 
-		// HAS(): should catch descendants, ancestor.has(potentialDescendant)   
+		// HAS(): should catch descendants, ancestor.has(potentialDescendant)
 		if (jQuery(escSel).has(el)) {
 			console.log("selector: "+escSel+" has() '"+el.id+"'");
 		}
 		if (jQuery(el).has($(escSel))) {
 			console.log("selector: "+escSel+" has '"+el.id+"' reversed");
 		}
-
-		return true;
+*/
 	}
 }
 
