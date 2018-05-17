@@ -21,30 +21,10 @@ function clickMatches(el, sels, dump = true) {
 		if (descs.length > 0) {
 			msg("element: " + el+" is descendants of $("+sels[i]+")")
 		}
-
 		
-//		console.log(jQuery(escSel)[0]+" - "+el)
 		if (jQuery(escSel).length > 0 && jQuery(escSel)[0] == el ){
 			msg(""+jQuery(escSel)[0].tagName +" is itself "+ el+" id: "+ (el.id ? el.id : "no id" ));											
-		}
-		
-/*		
-		// IS() : does NOT catch descendands, exact
-		if (jQuery(escSel).is(el)) {
-			console.log("selector: "+escSel+" is '"+el.id+"'");
-		}
-		if (jQuery(el).is(jQuery(escSel))) {
-			console.log("selector: "+escSel+" is '"+el.id+"'");
-		}
-
-		// HAS(): should catch descendants, ancestor.has(potentialDescendant)
-		if (jQuery(escSel).has(el)) {
-			console.log("selector: "+escSel+" has() '"+el.id+"'");
-		}
-		if (jQuery(el).has($(escSel))) {
-			console.log("selector: "+escSel+" has '"+el.id+"' reversed");
-		}
-*/
+		}		
 	}
 }
 
