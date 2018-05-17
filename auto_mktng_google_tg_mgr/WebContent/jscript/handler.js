@@ -1,18 +1,9 @@
-if(typeof jQuery === 'undefined'|| !jQuery){
-    (function(){
-        var s=document.createElement('script');
-        s.setAttribute('src','https://code.jquery.com/jquery-3.3.1.js');
-        if(typeof jQuery=='undefined'){
-            document.getElementsByTagName('head')[0].appendChild(s);
-        }
-    })();
-}
-
 function msg(m) { console.log("##enrico: "+m) }
 
 function buildPath(e)  {
 
 	var pars = $(e).parents();
+	
 	els = pars.map(function() { return this.tagName; }).get().reverse();
 	msg("elements: "+els);
 	ids = pars.map(function() { return this.id; }).get().reverse();
@@ -26,10 +17,19 @@ function buildPath(e)  {
 	    attrs.push(elattrs);
 	    msg("attr el["+i+"]: "+elattrs);
 	}
-	
-
 	return true;
 }
+
+
+var idsMustTrap = ["button01"
+	, "button02"
+	, "ReadyToGoBar:https://rules.config.landrover.com/jdxl/en_gb/l550"
+	];
+
+var selsMustTrap = [ // "ReadyToGoBar\:https\:\/\/rules\.config\.landrover\.com\/jdxl\/en_gb\/l550"
+	"#button01"
+	,"#ReadyToGoBar:https://rules.config.landrover.com/jdxl/en_gb/l550"
+	];
 
 
 
@@ -42,20 +42,12 @@ function buildPath(e)  {
     	/** ******************** */
         // YOUR CODE HERE
     	
-    	var idsMustTrap = ["button01"
-    		, "button02"
-    		, "ReadyToGoBar:https://rules.config.landrover.com/jdxl/en_gb/l550"
-    		];
-
-    	var selsMustTrap = [ // "ReadyToGoBar\:https\:\/\/rules\.config\.landrover\.com\/jdxl\/en_gb\/l550"
-    		"#button01"
-    		,"#ReadyToGoBar:https://rules.config.landrover.com/jdxl/en_gb/l550"
-    		];
-
-
-
-    	
-    	function evmatches(el, sels, dump = true) {
+ 
+    	/*
+    	 * Exploring how to detect clicks
+    	 * el: should be evt.target
+    	 * */
+    	function clickMatches(el, sels, dump = true) {
     			    		    		
     		for (i = 0; i < sels.length; i++) {
     			if (sels[i].charAt(0) == '.' || sels[i].charAt(0) == '.') 
@@ -63,14 +55,6 @@ function buildPath(e)  {
     			else 
     				escSel = jQuery.escapeSelector(sels[i]);
 
-    			// match
-/*    			if (el.match(escSel)) {
-    				console.log("'"+el.id+"' matches "+sels[i])
-    			}
-    			if ($(escSel).match(el)) {
-    				console.log("'"+el.id+"' matches "+sels[i]+" reversed")
-    			}
-*/
     			// is: does NOT catch descendands, exact 
     			if (jQuery(escSel).is(el)) {
     				console.log("selector: "+escSel+" is '"+el.id+"'");
@@ -87,44 +71,23 @@ function buildPath(e)  {
     				console.log("selector: "+escSel+" has '"+el.id+"' reversed");
     			}
 
-    			msg(buildPath(el));
-    			
     			return true;
     		}
     	}
 
 
-    	function processEvent(evt) {
-    		// console.log("in process event");
+    	function genericClickHandler(evt) {	    	
+	        msg("enrico click by a " + event.target.nodeName + " element.");
+	    	evt.preventDefault(); // try to prevent navigating away    	    	
     		target = evt.target;
     		msg("event target: element"+target +" ID="+target.id+" class ="+target.class);
-    		evmatches(target,selsMustTrap,true);	
+    		clickMatches(target,selsMustTrap,true);	
+	        return false;    		
     	}
-
-    	jQuery(document).ready(function(){
-    		
-    	    $(document).on('click', function(evt) {
-    	    	
-    	    	matches = $("div").has("div");
-    	    	for (i = 0; i < matches.length; i++) {
-    	    		if (matches.has("div")) {
-    	    			msg("yes")
-    	    		} else {
-    	    			msg("no")    	    			
-    	    		}
-    	    	}
-    	    	
-    	    	evt.preventDefault()
-    	    	
-    	        message = "enrico Click by a " + event.target.nodeName + " element.";
-    	        console.log(message);
-    	        if(!jQuery(evt.target).is('#my-id')) {
-    	        // Hide
-    	        }
-    	        processEvent(evt);
-    	        
-    	        return false;
-    	    });
+    	
+    	
+    	jQuery(document).ready(function(){    		
+    	    $(document).on('click',genericClickHandler);
     	});
 
 
