@@ -5,12 +5,16 @@
 function clickMatches(el, sels, dump = true) {
 
 	for (i = 0; i < sels.length; i++) {
-		if (sels[i].charAt(0) == '.' || sels[i].charAt(0) == '.') 
-			escSel = sels[i].charAt(0)+jQuery.escapeSelector(sels[i].substring(1, sels[i].length-1));
+		if (sels[i].charAt(0) == '.' || sels[i].charAt(0) == '#') 
+			escSel = sels[i].charAt(0)+jQuery.escapeSelector(sels[i].substring(1));
 		else 
 			escSel = jQuery.escapeSelector(sels[i]);
 
-		// is: does NOT catch descendands, exact 
+		
+		selecteds = jQuery(escSel); 
+		
+		
+		// IS() : does NOT catch descendands, exact 
 		if (jQuery(escSel).is(el)) {
 			console.log("selector: "+escSel+" is '"+el.id+"'");
 		}
@@ -18,9 +22,9 @@ function clickMatches(el, sels, dump = true) {
 			console.log("selector: "+escSel+" is '"+el.id+"'");
 		}
 
-		// has: should catch descendants, ancestor.has(potentialDescendant)   
+		// HAS(): should catch descendants, ancestor.has(potentialDescendant)   
 		if (jQuery(escSel).has(el)) {
-			console.log("selector: "+escSel+" has '"+el.id+"'");
+			console.log("selector: "+escSel+" has() '"+el.id+"'");
 		}
 		if (jQuery(el).has($(escSel))) {
 			console.log("selector: "+escSel+" has '"+el.id+"' reversed");

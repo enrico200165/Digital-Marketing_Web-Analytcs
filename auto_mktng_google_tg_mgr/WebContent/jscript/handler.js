@@ -21,17 +21,6 @@ function buildPath(e)  {
 }
 
 
-var idsMustTrap = ["button01"
-	, "button02"
-	, "ReadyToGoBar:https://rules.config.landrover.com/jdxl/en_gb/l550"
-	];
-
-var selsMustTrap = [ // "ReadyToGoBar\:https\:\/\/rules\.config\.landrover\.com\/jdxl\/en_gb\/l550"
-	"#button01"
-	,"#ReadyToGoBar:https://rules.config.landrover.com/jdxl/en_gb/l550"
-	];
-
-
 function genericClickHandler(evt) {	    	
     msg("enrico click by a " + event.target.nodeName + " element.");
 	evt.preventDefault(); // try to prevent navigating away    	    	
@@ -47,6 +36,7 @@ var codeToExecute = function() {
 	jQuery(document).ready(function(){    		
 	    $(document).on('click',genericClickHandler);
 	});
+
 };
 
 
