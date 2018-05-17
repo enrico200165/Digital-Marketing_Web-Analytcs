@@ -1,0 +1,4 @@
+(function(w){"use strict";try{w.NCCBOOMR.site_domain="landrover.co.uk"||w.location.hostname;w.NCCBOOMR.CustomMetric={rules:[{pattern:"conversionCallback",callback:function(){var conversion={};if(w.location.href.indexOf("jdxpayoff.html")!=-1){conversion.conversion_mode="purchase";conversion.conversion_currency="GBP";conversion.conversion_items=1;try{var priceTxt=document.querySelector('.payoff-heading-total-price').innerText;var poundPos=priceTxt.indexOf("£");priceTxt=priceTxt.substr(poundPos+1);priceTxt=priceTxt.replace(",","");var value=parseInt(priceTxt,10);conversion.conversion_value=value;}
+catch(e){w.BOOMR.debug("Failed to scrape conversion value.");return null;}}
+return conversion;}}]};w.BOOMR.init(w.NCCBOOMR);}
+catch(e){}}(window));

@@ -1,0 +1,10 @@
+{
+  "name": "HTTPS_node_js",
+  "version": "1.0.0",
+  "author": "Patrik Suzzi",
+  "license": "EPL",
+  "devDependencies": {
+    "express": "*",
+    "open": "*"
+  }
+}

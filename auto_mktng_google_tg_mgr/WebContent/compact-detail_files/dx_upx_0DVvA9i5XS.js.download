@@ -1,0 +1,1282 @@
+(function() {
+
+  var BRAND_INDEX = 0 ;
+  var CONVERSION_TYPE_INDEX = 1;
+  var COUNTRY_INDEX = 2;
+  var CONVERSION_PIXEL_INDEX = 3;
+
+  var MAP_URL = 0;
+  var MAP_FUNC = 1;
+  var MAP_PIXEL = 2;
+
+  var SINGLE_PAGE_BASE_URL = 0;
+  var SINGLE_PAGE_BASE_PIXEL = 1;
+  var SINGLE_PAGE_SUCCESS_URL = 2;
+  var SINGLE_PAGE_SUCCESS_PIXEL = 3;
+  var SINGLE_PAGE_CONV_TIMEOUT_MS = 1500;
+
+  // this is a flag to track conversions in a given browser session.
+  // This is only for single page workflows.
+  var sessionUserConverted = false;
+
+  var firePixels = function(pixelIds) {
+    var dxDomain = '//tags.w55c.net/rs?id=';
+    var model = "";
+    model = getParameterByName('model');
+    if (model == "") {
+      model = getParameterByName('veh');
+    }
+
+    for (var i = 0; i < pixelIds.length; i++) {
+      var dxPixelId = pixelIds[i];
+      var cb = Math.floor(Math.random() * 99999);
+      var pixelSrc = dxDomain + dxPixelId + '&rnd=' + cb;
+      if (model != "") {
+        pixelSrc = pixelSrc + '&sku=' + model;
+      }
+      var img = document.createElement('img');
+      img.src = pixelSrc;
+    }
+  };
+
+  var getParameterByName = function(name) {
+    name = name.replace(/[\[]/, "\\[").replace(/[\]]/, "\\]");
+    var regex = new RegExp("[\\?&]" + name + "=([^&#]*)");
+    var results = regex.exec(location.search);
+    return results === null ? "" : decodeURIComponent(results[1].replace(/\+/g, " "));
+  };
+
+  var getDiagnosticPixel = function() {
+    var pixel = [];
+
+    if (diagnosticPixelMap.hosts.hasOwnProperty(window.location.host)) {
+      pixel.push(diagnosticPixelMap.hosts[window.location.host]);
+      return pixel;
+    }
+
+    for (var exp in diagnosticPixelMap.expressions) {
+      if (diagnosticPixelMap.expressions.hasOwnProperty(exp) &&
+          new RegExp(exp).exec(window.location.href)) {
+        pixel.push(diagnosticPixelMap.expressions[exp]);
+        return pixel;
+      }
+    }
+
+    return pixel;
+  };
+
+  var normalizeUrl = function(normURL) {
+    var replacedURL = normURL.replace(/^https?:\/\//, '');
+
+    if (replacedURL.substr(-1) == '/') {
+      replacedURL = replacedURL.substr(0, replacedURL.length - 1);
+    }
+
+    return replacedURL;
+  };
+
+  var checkConversionUrls = function(pixelIds, normalizedUrl) {
+    for (var i = 0; i < conversionUrlArray.length; i++) {
+      // [brand, conversion type, country, pixelid]
+      if (new RegExp(conversionUrlArray[i][CONVERSION_TYPE_INDEX]).exec(normalizedUrl) &&
+          new RegExp(conversionUrlArray[i][BRAND_INDEX]).exec(normalizedUrl) &&
+          new RegExp(conversionUrlArray[i][COUNTRY_INDEX]).exec(normalizedUrl)) {
+        pixelIds.push(conversionUrlArray[i][CONVERSION_PIXEL_INDEX]);
+        return;
+      }
+    }
+  };
+
+  /**
+   *  Bind an event to the element refered to be el.
+   *   params:
+   *    el - the element
+   *    eventType - string event, e.g. 'click'
+   *    pixelIds - the pixel IDs to fire on event
+   */
+  var dxAddEvent = function(el, eventType, pixelIds, customHandler) {
+    var handler = customHandler || function() { firePixels(pixelIds); };
+
+    if (el.addEventListener) { // DOM Level 2 browsers
+      el.addEventListener(eventType, handler, false);
+    } else if (el.attachEvent) { // IE <= 8
+      el.attachEvent('on' + eventType, handler);
+    } else { // ancient browsers
+      el['on' + eventType] = handler;
+    }
+  };
+
+  /* binding brochure download to PDF links */
+  var bindBrochureDownload = function(pixelIds) {
+    var aNodes = document.querySelectorAll('[href$="pdf"]');
+
+    for (var i = 0; i < aNodes.length; i++) {
+      dxAddEvent(aNodes[i], 'click', pixelIds);
+    }
+  };
+
+  var bindSinglePageCarBuilds = function(normUrl) {
+    for (var i = 0; i < singlePageCarBuilds.length; i++) {
+      var carBuildConfig = singlePageCarBuilds[i];
+      var partialUrl = carBuildConfig[SINGLE_PAGE_BASE_URL];
+      if (normUrl.indexOf(partialUrl) != -1) {
+
+        var basePixel = carBuildConfig[SINGLE_PAGE_BASE_PIXEL];
+        var convUrl = carBuildConfig[SINGLE_PAGE_SUCCESS_URL];
+        var convPixel = carBuildConfig[SINGLE_PAGE_SUCCESS_PIXEL];
+
+        firePixels([basePixel]);
+
+        // Fire the conversion function on a timer
+        document.addEventListener('click', function() {
+          setTimeout(
+            function() {
+              fireSinglePageConversion(convPixel, convUrl)
+            },
+            SINGLE_PAGE_CONV_TIMEOUT_MS
+          );
+        });
+      }
+    }
+  }
+
+  var fireSinglePageConversion = function(pixelId, convUrl) {
+    if (sessionUserConverted) {
+      return;
+    }
+
+    var currentUrl = normalizeUrl(window.location.host + window.location.pathname);
+    if (currentUrl.indexOf(convUrl) == -1) {
+      return;
+    }
+
+    firePixels([pixelId]);
+    sessionUserConverted = true;
+  }
+
+  /* Main function to fire pixel based on matching the current URL to the URL Map */
+  var dxUpx = function() {
+    // This represents a list of pixel ids to fire, it may be more than 1
+    var dxPixelIds = getDiagnosticPixel();
+    var urlWithNoQueryString = window.location.host + window.location.pathname;
+    var urlWithQueryString = window.location.href;
+    var normalizedUrl = normalizeUrl(urlWithNoQueryString);
+    var normalizedUrlWithQueryString = normalizeUrl(urlWithQueryString);
+
+
+    // check for brochure download and bind events
+    if (brochureDownloadUrls.hasOwnProperty(normalizedUrl)) {
+      // landrover and jaguar have different brochure page configuration
+      bindBrochureDownload([brochureDownloadUrls[normalizedUrl]]);
+    }
+
+    // check for extact match for URL with parameters and without
+    var bothUrls = [normalizedUrl, normalizedUrlWithQueryString];
+    for (var urlIndex = 0; urlIndex < bothUrls.length; urlIndex++) {
+      if (exactMatchUrlMap.hasOwnProperty(bothUrls[urlIndex])) {
+        dxPixelIds.push(exactMatchUrlMap[bothUrls[urlIndex]]);
+        // no need to move further if we find an exact match
+        firePixels(dxPixelIds);
+        return;
+      }
+    }
+
+    checkConversionUrls(dxPixelIds, normalizedUrl);
+
+    // Check for quirky single page car build workflow
+    bindSinglePageCarBuilds(normalizedUrl);
+
+    // checking for partial match. Partial match pixels should be fired even if if we have conversion url
+    for (var i = 0; i < partialMatchUrlMap.length; i++) {
+      if (normalizedUrl.indexOf(partialMatchUrlMap[i][0]) != -1) {
+        dxPixelIds.push(partialMatchUrlMap[i][1]);
+      }
+    }
+
+    // checking for test drive urls
+     var queryString = normalizedUrlWithQueryString.split("?")[1];
+     if (typeof queryString !== 'undefined') {
+       var firstQueryStringParameter = queryString.split("&")[0];
+       for (var i = 0; i < testDriveArray.length; i++) {
+         if (normalizedUrlWithQueryString.indexOf(testDriveArray[i][0]) != -1 && firstQueryStringParameter == testDriveArray[i][1]) {
+           dxPixelIds.push(testDriveArray[i][2]);
+         }
+       }
+     }
+
+     // Finally check conditional pixel fires
+     for (var i = 0; i < conditionalMappings.length; i++) {
+       if (conditionalMappings[i][MAP_URL] == normalizedUrl && conditionalMappings[i][MAP_FUNC]()) {
+          dxPixelIds.push(conditionalMappings[i][MAP_PIXEL]);
+       }
+     }
+
+    firePixels(dxPixelIds);
+
+  };
+
+  var exactMatchUrlMap = {
+    'www.jaguar.es/index.html': 'eebbb7530f874a1da149aaadfb59d5bf',
+    'www.jaguar.es/about-jaguar/special-vehicle-operations.html': '2b1bc10d19434d4884052d9df8a5336c',
+    'www.jaguar.es/build-yours/index.html': '3e8e3d5b757146ea87a63a1aabe197d5',
+    'www.jaguar.es/offers-and-finance/promotions/f-pace.html': '4e4f363c580245b59f10c17497c62371',
+    'www.jaguar.es/offers-and-finance/promotions/xe.html': '015e40a1494841c2b32370e0c80e5635',
+    'www.jaguar.es/offers-and-finance/promotions/xf.html': '6bc8811dc5fe4f078152e81695940677',
+    'www.jaguar.es/comparison-tool/index.html': '54c6d7bafa9240bcae0240e787bbd4fd',
+    'www.jaguar.es/request-a-brochure/index.html': '2617b2b45e4e4a1a88225dac7c7ec366',
+    'www.landrover.es/index.html': '02739fe5c92e4129a73dbd6f74b8b3ed',
+    'www.landrover.es/national-dealer-locator.html': '9712ded00de346979572b14f20dd356c',
+    'www.landrover.es/shopping-tools/brochures.html': '018086e765d34d349c96a2b9288a9f04',
+    'www.landrover.es/ownership/contact-us/index.html': '6ef1876024cf4d168e2d0646d2049d8e',
+    'www.landrover.es/offers-and-finance/ofertas-particulares/discovery-sport.html': '36dc29cba9a54a89a2cf6a238e82276b',
+    'www.landrover.es/offers-and-finance/ofertas-particulares/range-rover-evoque-pure-tech-edition.html': '76dad18b0fb749f494dfe648c97cd8b5',
+    'www.jaguar.de/index.html': '130c0cca9e2e4f97a12bf84379723c69',
+    'www.jaguar.de/ueber-jaguar/special-vehicle-operations.html': '8ddc252ce9ff4b85b02204fb0dd95184',
+    'www.jaguar.de/konfigurator/index.html': '13818a8c9b9f48b691cc23f69904dd04',
+    'www.jaguar.de/leasing-und-angebote/F-PACE.html': 'deda9927e79a43278c954f9788b68938',
+    'www.jaguar.de/leasing-und-angebote/xe.html': 'f2149103c435439d95dda1ce76087113',
+    'www.jaguar.de/leasing-und-angebote/jaguar-xf.html': 'f9e2b324777d426a8bd00385e6d140a6',
+    'www.jaguar.de/leasing-und-angebote/f-type.html': '01f354d242d346e29a42bca5b4afaab4',
+    'www.jaguar.de/leasing-und-angebote/f-type-coupe.html': '3357084f0ae04c40aeefa761bc35ce8c',
+    'www.jaguar.de/leasing-und-angebote/xj.html': '27998dbbd09f4c6d9cbb106bef89b0af',
+    'www.jaguar.de/comparison-tool/index.html': '00f8830ded1748ed81b7bcfce11651db',
+    'www.jaguar.de/broschuere-anfragen/index.html': 'de6b8dc95ebc4bf19019330ede6d2d7f',
+    'www.landrover.de/index.html': 'fb39c33d3038410b8ebd2f9d22fad3b0',
+    'www.landrover.de/finance/leasing-und-finanzierung/der_neue_Discovery.html': '05eb0a4c072d432d8520c190d6d58720',
+    'www.landrover.de/finance/leasing-und-finanzierung/DiscoverySport.html': '578fe7c05f824f22bc1a99d5b201a60b',
+    'www.landrover.de/finance/leasing-und-finanzierung/RangeRoverEvoque.html': 'b8c4e1f5fe0449c59cc486cf03b2651d',
+    'www.landrover.de/finance/leasing-und-finanzierung/RangeRover.html': '2c7844ef7d644325838c7e34268db396',
+    'www.landrover.de/finance/leasing-und-finanzierung/RangeRoverSport.html': '742fff42ec1c46a8b3e37505f2b70500',
+    'www.landrover.de/finance/leasing-und-finanzierung/RangeRoverVelar.html': 'beefae6d4e1242aeb2f8ffba199dce65',
+    'www.landrover.de/national-dealer-locator.html': '8c7a4c06ba99413892f89e3c7b605aa2',
+    'www.landrover.de/shopping-tools/brochures.html': '046bec52afef476ea70bd80d9c9665e8',
+    'www.landrover.de/ownership/contact-us/index.html': '3fc8c906d2fd40bfb4357b6e70648c0a',
+    'www.landrover.de/vehicles/range-rover': '552bd8614c42468db55babae4831f364',
+    'www.jaguar.it/about-jaguar/special-vehicle-operations.html': 'cf2e66b051cb426ba499c35947478a79',
+    'www.jaguar.it/build-yours/index.html': 'd923547431274eab955666aa7ac0c5f9',
+    'www.jaguar.it/offers-and-finance/offerte/xe.html': '4fcbeabaf31946bcaeb567f96d55cbd5',
+    'www.jaguar.it/offers-and-finance/offerte/xf.html': '150a2f1693804f7994dbaebfba29aba6',
+    'www.jaguar.it/offers-and-finance/offerte/f-pace.html': '26bea07663ae43ca96eff2e7daafeddc',
+    'www.jaguar.it/offers-and-finance/offerte/xj.html': '01beda9ee5ad4337988b133210dcba2a',
+    'www.jaguar.it/offers-and-finance/offerte/f-type.html': '7b8dbdcd1e104877973368a99e32a2d5',
+    'www.jaguar.it/comparison-tool/index.html': '406c19da15d34b81a1ef8e063f0701f0',
+    'www.jaguar.it/request-a-brochure/index.html': '035f8e821f9e488eb04ea878c94eb416',
+    'www.jaguar.it/about-jaguar/contact-us.html': '6b7fd3b8dfc941318f23a0964b02b258',
+    'www.jaguar.it/index.html': 'ead0cefafb7f41d581d5d38a761eef56',
+    'www.landrover.it/index.html': 'd7974786d85d4b7fa2a2df2281a531a8',
+    'www.landrover.it/offers-and-finance/aanbiedingen/range-rover-sport.html': '8fbb609532b74414bcc80a0fa5c76b6f',
+    'www.landrover.it/offers-and-finance/aanbiedingen/range-rover-evoque.html': '12f5b82bb03d4e9095d4a52ab34a1d2b',
+    'www.landrover.it/offers-and-finance/aanbiedingen/discovery-sport.html': 'e8f8aca5b0b24de2a03ed88397f58e95',
+    'www.landrover.it/Dealer-locator.html': 'cc5d96df0dd54454a4a11ff1ffd8bc75',
+    'www.landrover.it/shopping-tools/brochures.html': 'fcd4c401d14841798f21e828cea3c6a0',
+    'www.landrover.it/ownership/contact-us/index.html': '0bc140173016440abdc370637f0f627d',
+    'landroverform.portalejlr.it/lrforms/testdrive.html': 'ad951436afd242e985dc73afe3e1671f',
+    'landroverform.portalejlr.it/lrforms/l538-tdr.html': 'd601413f0f9c46e6818a9baaa1c3bd32',
+    'landroverform.portalejlr.it/lrforms/l538-tdr-typ.aspx': '78f6c1ab1bd641968fe4b4ed66b5f5a3',
+    'www.jaguar.nl/index.html': '17da1991f9714a89ab1060b22cb0b1fa',
+    'www.jaguar.nl/about-jaguar/special-vehicle-operations.html': 'd83c4b6788104b7b99badc76528bbbcc',
+    'www.jaguar.nl/build-yours/index.html': '377e28eedc774ee697e0c6cc1aa528ca',
+    'www.jaguar.nl/offers-and-finance/aanbiedingen/xe.html': 'a5c2fbe2787b4cf6b4672793a6379c8b',
+    'www.jaguar.nl/offers-and-finance/aanbiedingen/xf.html': '60fb8ea44b37470f934e93009135ba2b',
+    'www.jaguar.nl/offers-and-finance/aanbiedingen/f-pace.html': '683211a4a1e1454884c95322ebbdfc62',
+    'www.jaguar.nl/offers-and-finance/aanbiedingen/xj.html': '68cf38fb6db140ff93691efe519af94d',
+    'www.jaguar.nl/offers-and-finance/aanbiedingen/f-type.html': 'b733fa6c844b4a4d8afb2510e66e76da',
+    'www.jaguar.nl/comparison-tool/index.html': '9e2d93113d7245759bcb57a71b2a31ca',
+    'www.jaguar.nl/request-a-brochure/index.html': '6369d6a7925b4c9f8802c1705673c0cc',
+    'www.landrover.nl/index.html': 'c7604dbdd1384c5dbeeed9408631a630',
+    'www.landrover.nl/offers-and-finance/aanbiedingen/range-rover.html': '506cf9fa06de4f168b2d7ee1de503053',
+    'www.landrover.nl/offers-and-finance/aanbiedingen/range-rover-sport.html': 'c2fc1a5b17e14733b20f5f49a33bea5a',
+    'www.landrover.nl/offers-and-finance/aanbiedingen/range-rover-evoque.html': 'e15400e71780459aac2ac7e625ccd4b8',
+    'www.landrover.nl/offers-and-finance/range-rover-evoque-urban-series-se.html': 'e1ce3eead82243ac9921c7f7bfbd2c9d',
+    'www.landrover.nl/offers-and-finance/range-rover-evoque-urban-series-se-dynamic.html': '8af5fdb758184244922d8d5e297a3da2',
+    'www.landrover.nl/offers-and-finance/range-rover-evoque-urban-series-pure.html': 'c1e0302aac524874aa0d1f6e490344ea',
+    'www.landrover.nl/offers-and-finance/aanbiedingen/discovery-sport.html': '55da0ff77c6a4244b85c8b974d730d86',
+    'www.landrover.nl/offers-and-finance/discovery-sport-urban-series-pure.html': '24f474d45a854133875d202e558051fa',
+    'www.landrover.nl/offers-and-finance/discovery-sport-urban-series-se.html': '42c8a89b792d456b9533c31872d72e78',
+    'www.landrover.nl/offers-and-finance/aanbiedingen/all-new-discovery.html': '3b4f34373b904d73bccf2ecef0084883',
+    'www.landrover.nl/offers-and-finance/aanbiedingen/range-rover-velar.html': '615709a608a74104bfb3b61f4bdbe73d',
+    'www.landrover.nl/Dealer-locator.html': '83df81e28fcb4a0ea92c6f6717366fa6',
+    'www.landrover.nl/shopping-tools/brochures.html': '220f2ef03d854bea863566027e317ea9',
+    'www.landrover.nl/ownership/contact/index.html': 'a374f45243bc447bab13003b4856d6d9',
+    'www.landrover.it/vehicles/range-rover/offerte-range-rover.html': '2a89d4dd0da9474ca06c4f7c2323cb49',
+    'www.jaguarportugal.pt/index.html': '76f5a87be4f949e0adf5400e4824e28f',
+    'www.jaguarportugal.pt/about-jaguar/special-vehicle-operations.html': 'e7a076dde8dc4094af2dbc9f36480c98',
+    'www.jaguarportugal.pt/build-yours/index.html': '1a7291faa7b94289810408f7e3a54226',
+    'www.jaguarportugal.pt/offers-and-finance/promotions/f-pace.html': '33a3e4d32fdb44909eb7f703d97bfdc8',
+    'www.jaguarportugal.pt/offers-and-finance/promotions/xe.html': '432225b1904f43da8d2b359df3f60843',
+    'www.jaguarportugal.pt/offers-and-finance/promotions/xf.html': 'f4d6466f757549e5b5061935ab054fc4',
+    'www.jaguarportugal.pt/comparison-tool/index.html': '170e1701844a40209a982ae198e5b2d2',
+    'www.jaguarportugal.pt/request-a-brochure/index.html': '7f4faec2fde34b67a212bf57371b6955',
+    'www.landrover.pt/index.html': '09dfbdcde51644b68dbd47170172c710',
+    'www.landrover.pt/offers-and-finance/campanhas-particulares/discovery-sport.html': '095d20b051d34585867f44e9d7b188e0',
+    'www.landrover.pt/offers-and-finance/campanhas-particulares/range-rover-evoque.html': '5d3598597b9f42fb852fca4eb195e954',
+    'www.landrover.pt/offers-and-finance/renting-offers.html': 'ac74549721f14a7c92e6c6afc2dad5fc',
+    'www.landrover.pt/national-dealer-locator.html': 'db0cfdd68d9d45b4b855a2516cd20fbc',
+    'www.landrover.pt/shopping-tools/brochures.html': '41b421d4aae749e3b8ba476288ff3dbb',
+    'www.landrover.pt/ownership/contact-us/index.html': 'a7c69e35313042c48195ddef5437aee9',
+    'lrdxforms.landrover.com/lr-pt-pt/confirmation.htm': 'da625d90bfa4497fb9ed94b2fc94eaee',
+    'www.jaguar.com.au/index.html': '6f196fb4adfe4b198d221adab6fe68cf',
+    'www.jaguar.com.au/about-jaguar/special-vehicle-operations.html': '090cdab92cad4aed8f0023b2919cc50a',
+    'www.jaguar.com.au/build-yours/index.html': 'ab4ad4f3218044b7b9e9094b94da8737',
+    'www.jaguar.com.au/offers-and-finance/jaguar-f-type.html': 'b38cee295ed4448596ac75303d4bc7c6',
+    'www.jaguar.com.au/offers-and-finance/jaguarunleashed.html': '12dc038bb86a4957b9c9616b4903fee7',
+    'www.jaguar.com.au/comparison-tool/index.html': 'e33b7d437b284b149c97d7bf87909157',
+    'www.jaguar.com.au/request-a-brochure/index.html': 'da1684f0f27a45fe9c0f91c0870a08fb',
+    'www.landrover.com.au/index.html': '26a7caa243dd4bc48db4ff6b5534a08f',
+    'www.landrover.com.au/offers-and-finance/mainevent.html': '3ff18bcd9b63467d85da8f854d95ddca',
+    'www.landrover.com.au/offers-and-finance/guaranteed-future-value.html': '148b92e4791e40da9b9c932c11f34ccd',
+    'www.landrover.com.au/offers-and-finance/insurance.html': '961593063e2246c7a245bc57c740579a',
+    'www.landrover.com.au/offers-and-finance/financialservices.html': 'c9f50f572e094cf7a6e3b33c0158b776',
+    'www.landrover.com.au/shopping-tools/explore-our-vehicles.html': '5b1aeb67ab154cce8bdd098153513a9d',
+    'www.landrover.com.au/national-dealer-locator.html': '6a71bb50bcd24bf78884ad0ebecd7655',
+    'www.landrover.com.au/shopping-tools/brochures.html': '48b159d316b04f4bae87eae93389a4e4',
+    'www.landrover.com.au/ownership/contact-us/index.html': 'e8eabbe6b8ac4cdf8736677e7a3ce7fe',
+    'lrdxforms.landrover.com/lr-au-en/confirmation.htm': 'b8dd8711970c4db0af934364853e194e',
+    'www.jaguar.co.uk/index.html': 'ff5d3a1c54bd41379ca3735d6735f322',
+    'www.jaguar.co.uk/build-yours/index.html': '879bda5efce14d7f8fc2289bb64e9217',
+    'www.jaguar.co.uk/offers-and-finance/all-offers/jaguar-privilege.html': 'f06cf2ae646241fab6fe240b8e2fa5c3',
+    'www.jaguar.co.uk/offers-and-finance/all-offers/jaguar-business-contract-hire.html': '870801f5d59947e4b382db157df7ad59',
+    'used.jaguar.co.uk': 'd6fb674848fe4182873bed9604f8a0c0',
+    'www.landrover.co.uk/index.html': '12da64eaaae34805929be177506d2dcc',
+    'www.landrover.co.uk/offers-and-finance/finance-offers/range-rover.html': 'e15c749b506f41e9b6d621e5c91bf3ed',
+    'www.landrover.co.uk/offers-and-finance/finance-offers/range-rover-sport.html': 'f56715ae01ee4427b7bd1381b9fb8ce0',
+    'www.landrover.co.uk/offers-and-finance/finance-offers/range-rover-velar.html': '28b8f5a1f5eb42e4be075f5b9d4ab167',
+    'www.landrover.co.uk/offers-and-finance/finance-offers/range-rover-evoque.html': 'e29c186acf4c4cfdb9d0140ea522b83a',
+    'www.landrover.co.uk/offers-and-finance/finance-offers/all-new-discovery.html': 'b3087f1f8c4c4513abbfada824572832',
+    'www.landrover.co.uk/vehicles/discovery-sport/offers.html': '7316f0e2240c44a8b306ab8c98dff11f',
+    'www.landrover.co.uk/shopping-tools/explore-our-vehicles.html': 'a792359072684613a8360c139a3a012c',
+    'www.landrover.co.uk/national-dealer-locator.html': 'f95bad91ae5347849534a83c1d66b935',
+    'www.landrover.co.uk/shopping-tools/brochures.html': '3af2ccf115e84dca8c5ab95913e31651',
+    'www.landrover.co.uk/contact-us.html': 'f983d2c97e6d48058a7ead1e589f0a28',
+    'www.landrover.co.uk': '71f608da05654b458f0ef45a620010b3',
+    'lrdxforms.landrover.com/lr-gb-en/confirmation.htm': 'ec2a5b8d12194ce8ab21815d9d78a50c',
+    'www.jaguarusa.com/index.html': 'e53b59a2c6d04670a839f972a27bb073',
+    'www.jaguarusa.com/build-yours/index.html': 'a76664aa356a4859a55a9d7a6da68227',
+    'www.jaguarusa.com/current-offers/xe-offers.html': '974048b00691468d993549bf5445203a',
+    'www.jaguarusa.com/current-offers/xf-offers.html': '2e9561a7375b4dd5aed4791295293983',
+    'www.jaguarusa.com/current-offers/xj-offers.html': '33f554b39aa14b84a0cd25696cdca11b',
+    'www.jaguarusa.com/current-offers/f-type-offers.html': '5ed63a26a94c4844933076af9e42a9e9',
+    'www.jaguarusa.com/current-offers/f-pace-offers.html': '181153d7dcbf4ae7b27c6aed88d1de8d',
+    'www.jaguarusa.com/owners/vin-recall.html': '6813a9fdd85d41639d6c07ebdc345e55',
+    'www.jaguarusa.com/comparison-tool.html': '248c5937a5af42819b310b572c2ee0ce',
+    'www.jaguarusa.com/request-a-brochure/index.html': '6b4ac0ad713c4492b1d334555b04743a',
+    'www.jaguarusa.com/calculate-trade-in-value.html': '450a5a74e8d545cd939534b255302330',
+    'www.jlrforms.com/forms/jdx-td': '736d3add915c4a148025ed469f1c54e9',
+    'www.landroverusa.com/index.html': 'e61ac46c26cb4ceaaefced46fd3ddfe6',
+    'www.landroverusa.com/vehicles/range-rover/ratings-reviews.html': 'dac62411f6b04fb9accca88a29934b0b',
+    'www.landroverusa.com/current-offers/land-rover-financial-group.html': '78e90fb7df8f4455a4bfbf9e24ee79b1',
+    'www.landroverusa.com/ownership/warranty.html': '3faf7871d1164018bbb285e90d9669e8',
+    'www.landroverusa.com/ownership/diesel-exhaust-fluid.html': 'ba677c60ac91415a90a571fa62a792c2',
+    'www.landroverusa.com/ownership/handover-encore.html': '228d4546b0a24055b65a87a6ff9455ea',
+    'www.landroverusa.com/experiences/at-the-retailer.html': '524914dfe8054860a139c565dbdd7116',
+    'www.landroverusa.com/shopping-tools/explore-our-vehicles.html': '0118ae66745e41c09bc84516954b075c',
+    'www.landroverusa.com/corporate-sales/tax-advantage.html': '9e06fb1b33c94e29808c0657bf4dc8be',
+    'www.landroverusa.com/corporate-sales/corporate-fleet.html': '1e035c72ffdb499b8afd0c6aafa0f51c',
+    'www.landroverusa.com/corporate-sales/vehicle-allowance.html': 'c0a7b3298983410cb372dddff8240b1d',
+    'www.landroverusa.com/corporate-sales/diplomat-embassy.html': 'e83ddce264f445ed9bb25fc752813f3d',
+    'www.landroverusa.com/corporate-sales/international-sales.html': 'cec2627cdb4f4d11aab155d160cb95dd',
+    'www.landroverusa.com/comparison-tool.html': '1bf88df34fe84648b3f5c1ac92f99e6f',
+    'www.landroverusa.com/national-dealer-locator.html': '141c94ab77c24ba79c1fb1fdb29379f4',
+    'www.landroverusa.com/shopping-tools/vehicle-brochures.html': 'abe5800f53a341e8be79b0a1e2295a23',
+    'www.landroverusa.com/contact-us.html': 'c4265157ce644842a49c338f23187c55',
+    'www.jlrforms.com/forms/lrdx-td': '30a7af1d921249b9af9ae16f439b259b',
+    'www.jlrforms.com/forms/lrdx-kmi': '722918005f764da5ba8283b3b4be6fe2',
+    'www.jaguar.at/index.html': '7f6ba0a9db70420ea2d23972a585e42e',
+    'www.jaguar.at/about-jaguar/special-vehicle-operations.html': '147584358b0d46c68bc352aeb18cc0e5',
+    'www.jaguar.at/ownership/diesel-exhaust-fluid.html': 'a97e1e26196d42cabbd9cc1d6fb48386',
+    'www.jaguar.at/request-a-brochure/index.html': 'a4788bdbb80842bc8cd5ea4e2ee2f82d',
+    'jaguar-at.at/DankeseiteKMI.aspx': 'dc980bf5360347feb6bc0200f1ba012a',
+    'www.jaguar-at.at/Dankeseite.aspx': '9a018c7e90314f329d33dffbf5e02f2b',
+    'www.landrover.at/index.html': '2d7cdfbad3b74e3e82ce24aed7e1b620',
+    'www.landrover.at/shopping-tools/explore-our-vehicles.html': '7c97df91ea5948a08cd219665bb2eb9c',
+    'www.landrover.at/offers-and-finance/experience-bonus.html': '01064220a9d844b4b774cfa897104d90',
+    'www.landrover.at/fleet-and-business/customer-service.html': 'ecb2f6bc33d84ca19d8b3cfd90350af2',
+    'www.landrover.at/fleet-and-business/fleet-business-center.html': 'eb1f51310d0d48e5898f154839bdeaed',
+    'www.landrover.at/fleet-and-business/fleet-and-business-leasing.html': 'a2a9d6e62baf4170994fb617be97f168',
+    'www.landrover.at/fleet-and-business/business-pakete.html': 'dcecbc33b7614dafb8551b1f7d266cb5',
+    'www.landrover.at/fleet-and-business/total-cost-of-ownership.html': '557025ad23f54e278f52fdd5dcd2b7d7',
+    'www.landrover.at/national-dealer-locator.html': 'c0a1b4ab51fb450c83a0bea90713e3f7',
+    'www.landrover.at/shopping-tools/brochures.html': 'fd27b81e3f8a415f8fd65bc32eb34485',
+    'www.landrover.at/ownership/contact-us': '0dd9e2cc6a034419ba0d98787c2dca56',
+    'landrover-at.at/Dankeseite.aspx': 'e3abb072d545484d81acf9f83a049fd1',
+    'landrover-at.at/Dankeseitekmi.aspx': '59a7d184876e4056a3e60ea9aa73bd6e',
+    'landroverform.portalejlr.it/lrforms/l560.html': 'fdb9939339c34ddf9b0f55c3ce2eea94',
+    'landroverform.portalejlr.it/lrforms/l560typ.aspx': 'f8c3cfaf2bbd4f92bab2865aeaf0e6d0',
+    'landroverform.portalejlr.it/lrforms/l550-tdr-typ.aspx': 'b685238199ee4d788e223e6a5f5e8071',
+    'landroverform.portalejlr.it/lrforms/l494-tdr.html': '770967629e834d3885f15bcf9fef22cf',
+    'landroverform.portalejlr.it/lrforms/l494-tdr-typ.aspx': '84077620a1114555a318bf38d1e743ac',
+    'landroverform.portalejlr.it/lrforms/l462-tdr.html': '467b030c1e124de6a496cd6c83306937',
+    'jaguarform.portalejlr.it/jagforms/f-pace-tdr-typ.aspx': '9a4e6706de014e6f9c27a5af3fd2d729',
+    'jaguarform.portalejlr.it/jagforms/f-pace-tdr.html': '20de079cc5964192bea8338b48966643',
+    'jaguarform.portalejlr.it/jagforms/f-type-tdr-typ.aspx': 'c437c48907614674af21f2e1d1737073',
+    'www.jaguar.de/jaguar-modelle/xe/angebote/flex-leasing.html': '06159f50325d4f9b8cdc6751455335ab',
+    'www.jaguar.de/jaguar-modelle/xf/angebote/flex-leasing.html': '57d1086ba1504ab9ac05ef97cfcab49b',
+    'www.jaguar.de/jaguar-modelle/f-pace/angebote/flex-leasing.html': '6fe61f47e2c442c1b02d7b88cab0938f',
+    'www.jaguar.de/leasing-und-finanzierungsangebote/privatkunden/flex-leasing.html': 'a8f52e962c0343f8b87272baeb03a6e0',
+    'www.jaguar-formulare.de/angebote/flexleasing/success.php': '633e6afb06ac4f2c87c82ff2148dab9e',
+    'www.landrover-formulare.de/angebote/flexleasing/success.php': '60c33167250f4727a2abce2c331bfc43',
+    'www.landrover.de/finance/flex-leasing.html': 'b988d812781b4b72a415114f2e9b865f',
+    'jaguarform.portalejlr.it/jagforms/xf-sb-tdr.html': 'd9c0b564f8034f7bb5e8d80649e07d6e',
+    'jaguarform.portalejlr.it/jagforms/xf-sb-tdr-typ.aspx': '33418603c42b4f4d88898d3a740fcbad',
+    'jaguarform.portalejlr.it/xe-awd-digital-campaign/index.html': '670b85f90e244391818b648dd547d2b6',
+    'jaguarform.portalejlr.it/xe-awd-digital-campaign/grazie.html': 'de89b039ba35442c9d7c689c546e8a7f',
+    'jaguarform.portalejlr.it/xf-awd-digital-campaign/indexNewXf.html': 'c672812118674a8f813e675fdf8db0c2',
+    'jaguarform.portalejlr.it/xf-awd-digital-campaign/grazieNewXf.html': 'e6e77c715a7a46e4856cfa22d45c70a2',
+    'jaguarform.portalejlr.it/jagforms/xj.html': '32fd1ec52c844c6caf48146c431666f5',
+    'jaguarform.portalejlr.it/jagforms/f-type-tdr.html': '3a193c7c9ee741a4b9bb748dc6668981',
+    'jaguarform.portalejlr.it/jagforms/e-pace-tdr.html': '455020838dcd41a7a60a3e35cd8ef2ba',
+    'jaguarform.portalejlr.it/jagforms/e-pace-tdr-typ.aspx': '3fd41332609f4263a66bcee788cb0921',
+    'www.jaguar.at/jaguar-range/e-pace/probefahrt/index.html': 'a866399adc584f88a6543ef13d7ea927',
+    'jaguar-at.at/epace.aspx': '7515a5c0e6344f2cbc18166435fe26c5',
+    'jaguar-at.at/dankeepace.aspx': '93f84430b9cd4061a0ac0b7c30d91944',
+    'landroverform.portalejlr.it/lrforms/l550-tdr.html': '875f75c7af7d4768ac3ee295afbbeeba',
+    'www.jaguar.de/leasing-und-finanzierungsangebote/privatkunden/performance-leasing.html': 'eff966cb100c45d9960d4b7047b50a34',
+    'www.jaguar-formulare.de/angebote/performanceleasing': '1b7ce72be77f400d87c775902ddb29c6',
+    'www.jaguar-formulare.de/angebote/performanceleasing/success.php': '54ccef059aac4411ae5a0b6657ba1cce',
+    'www.landrover.de/finance/performance-leasing.html': '7a6a7ae17dcd46eeb23180e8b0e406c0',
+    'www.landrover-formulare.de/angebote/performanceleasing': '6d4241152d0b4a089db7eb37ce0e28af',
+    'www.landrover-formulare.de/angebote/performanceleasing/success.php': '3d1c664cca554474b257e3734abb17eb',
+    'www.jaguar.at/leasing-und-angebote/performance-bonus.html': '61207002dae0465781c07a054752eaff',
+    'jaguar-at.at/performance_bonus': 'f37b24b8a0c94d5798ca8e55d439410a',
+    'jaguar-at.at/Dankeseitebonus.aspx': '170d854d1824497cb3d51dc466b40e33',
+    'www.jaguar-formulare.de/probefahrt_xf_xfsb/b/success.php': '3a911edcee5946d98c993d55f345aeb0',
+    'jaguarform.portalejlr.it/jdx-forms/td-thanks.aspx': 'fd024080a7ba46da87ea393055c343f0',
+    'www.contact-jaguar.fr/demande-essai/xe': '25d9800bde0b4407a98d297da1da60f9',
+    'www.contact-jaguar.fr/demande-essai-confirmation/xe': '5d36902d58de40da929d7e65548281e7',
+    'www.contact-jaguar.fr/demande-essai/xf': '52d3181608fb48f7bf80aaae01a217dc',
+    'www.contact-jaguar.fr/demande-essai-confirmation/xf': 'df0b47e6c6e04e629913c570aea93e91',
+    'jaguarlandrover.emsecure.net/optiext/optiextension.dll?FORMCODE=jag-td-be-fr': 'a32b118f1fd4479db8076849439603d6',
+    'jaguarlandrover.emsecure.net/optiext/optiextension.dll?FORMCODE=jag-td-be-nl': 'a32b118f1fd4479db8076849439603d6',
+    'jdxforms.jaguar.com/jaguar-de-de/servlet/SmartForm.html': '77fb481f6dc64e4cac50b79ace73ec37',
+    'jaguarform.portalejlr.it/jdx-forms/testdrive.aspx': '586f9edcd8ed4e9b80a51bf30fb6ba09',
+    'landrover-at.at/experience-bonus': '5598282f71f4466a83b2f78f55aca8df',
+    'landrover-at.at/DankeseiteEXPB.aspx': '068a98a7cf2647e19e96a5e5292c9d1f'
+  };
+
+  var diagnosticPixelMap = {
+    'hosts': {
+      'www.jaguar.es': 'b6220532ab564986b9a0920d25366a26',
+      'approved.es.jaguar.com': 'b6220532ab564986b9a0920d25366a26',
+      'www.infojaguar.es': 'b6220532ab564986b9a0920d25366a26',
+
+      'www.landrover.es': '2c05553693b74b16a7472d6f7b889201',
+      'www.infolandrover.es': '2c05553693b74b16a7472d6f7b889201',
+      'approved.es.landrover.com': '2c05553693b74b16a7472d6f7b889201',
+
+      'www.jaguar.de': '44ce4da9bddc4180ab2872ab3576e269',
+      'approved.jaguar.de': '44ce4da9bddc4180ab2872ab3576e269',
+      'www.jaguar-formulare.de': '44ce4da9bddc4180ab2872ab3576e269',
+
+      'www.landrover.de': '3841c81147c84f8b84547fcd89f37be2',
+      'www.approved.landrover.de': '3841c81147c84f8b84547fcd89f37be2',
+      'www.landrover-formulare.de': '3841c81147c84f8b84547fcd89f37be2',
+
+      'www.jaguar.it': '730ebbc53f5941f1b91d2cdf88f4995a',
+      'www.jaguarapproved.it': '730ebbc53f5941f1b91d2cdf88f4995a',
+
+      'www.landrover.it': 'd622a31ce54f4e5a88c3e1a02627e9d9',
+      'www.landroverapproved.it': 'd622a31ce54f4e5a88c3e1a02627e9d9',
+      'landroverform.portalejlr.it' : 'd622a31ce54f4e5a88c3e1a02627e9d9',
+
+      'www.jaguar.nl': 'fa83cbffb1ff40e2bc245cf09a2977cd',
+      'www.jaguarapproved.nl': 'fa83cbffb1ff40e2bc245cf09a2977cd',
+
+      'www.landrover.nl': '51f9ded7c8e0423688a29363a841975a',
+      'www.landroverapproved.nl': '51f9ded7c8e0423688a29363a841975a',
+
+      'www.jaguarportugal.pt': '29aaadb103d047ca9d26d56cb5d00115',
+      'www.jaguarapproved.pt': '29aaadb103d047ca9d26d56cb5d00115',
+
+      'www.landrover.pt': '14075d8b012345b897075c16860111e5',
+      'www.landroverapproved.pt': '14075d8b012345b897075c16860111e5',
+
+      'www.jaguar.com.au': '3d5880109d5645e1b52016bee5bd52a5',
+      'www.jaguarapproved.au': '3d5880109d5645e1b52016bee5bd52a5',
+
+      'www.landrover.com.au': '5172a4a101fe41728e39e041473d1754',
+      'www.landroverapproved.au': '5172a4a101fe41728e39e041473d1754',
+
+      'www.jaguar.co.uk': '3862f2832fa94b5c8538a84dc7038eb4',
+      'www.landrover.co.uk': '71f608da05654b458f0ef45a620010b3',
+
+      'www.jaguarusa.com': 'e6aa69d0a1e14ab09dbbea9f81879f01',
+      'www.landroverusa.com': 'c0f3f7cd2612429fa1d3b7c87242ac68',
+
+      'www.jaguar.at': 'f2caf38270914a58bb5b1211c5f76027',
+      'jaguar-at.at': 'f2caf38270914a58bb5b1211c5f76027',
+      'www.landrover.at': 'da9d1f950bae4af1b71518999d7573c0',
+      'landrover-at.at': 'da9d1f950bae4af1b71518999d7573c0',
+
+      'www.jaguar.fr': '7b9cec7a7ecf45fca3e95e71ed6c75ce',
+
+      'www.jaguar.be': '59ce9f7de1b146a6aeae847837a96b49'
+
+    },
+    'expressions': {
+      '\.jaguar\.com.*[\/-]es([-_]es)?' : 'b6220532ab564986b9a0920d25366a26',
+      '\.landrover\.com.*[\/-]es([-_]es)?' : '2c05553693b74b16a7472d6f7b889201',
+      '\.jaguar\.com.*[\/-]de([-_]de)?' : '44ce4da9bddc4180ab2872ab3576e269',
+      '\.landrover\.com.*[\/-]de([-_]de)?' : '3841c81147c84f8b84547fcd89f37be2',
+      '\.jaguar\.com.*[\/-]it([-_]it)?' : '730ebbc53f5941f1b91d2cdf88f4995a',
+      '\.landrover\.com.*[\/-]it([-_]it)?' : 'd622a31ce54f4e5a88c3e1a02627e9d9',
+      '\.jaguar\.com.*[\/-]nl([-_]nl)?' : 'fa83cbffb1ff40e2bc245cf09a2977cd',
+      '\.landrover\.com.*[\/-]nl([-_]nl)?' : '51f9ded7c8e0423688a29363a841975a',
+      '\.jaguar\.com.*[\/-]pt([-_]pt)?' : '29aaadb103d047ca9d26d56cb5d00115',
+      '\.landrover\.com.*[\/-]pt([-_]pt)?' : '14075d8b012345b897075c16860111e5',
+      '\.jaguar\.com.*[\/-]au([-_]au)?' : '3d5880109d5645e1b52016bee5bd52a5',
+      '\.landrover\.com.*[\/-]au([-_]au)?' : '5172a4a101fe41728e39e041473d1754',
+      '\.jaguar\.com.*[\/-]en([-_]gb)?' : '3862f2832fa94b5c8538a84dc7038eb4',
+      '\.landrover\.com.*[\/-]en([-_]gb)?' : '71f608da05654b458f0ef45a620010b3'
+    }
+  };
+
+  var partialMatchUrlMap = [
+    ['www.jaguar.es/jaguar-range/xe', 'dafb313d08304bce8b37ad7fa4c9fd2d'],
+    ['www.jaguar.es/jaguar-range/xf', 'ee18466b107a4d49af8ad263c30f42eb'],
+    ['www.jaguar.es/jaguar-range/xj', '7094b2f86ec74c728782282017b7545a'],
+    ['www.jaguar.es/jaguar-range/f-pace', '044d3333ec494095b88725b4644c66fc'],
+    ['www.jaguar.es/jaguar-range/f-type', '0565e41b5cb44cdea44dffe362556f37'],
+    ['www.jaguar.es/jaguar-range/i-pace-concept-car', '99e13279872745f9a84b7ea8b90c4e97'],
+    ['www.jaguar.es/jaguar-range', 'b7b448156bfd4fc3807c38f568eb6a6b'],
+    ['www.jaguar.es/offers-and-finance', '7cc11dfee6e441cb8c874e152c0a4b15'],
+    ['approved.es.jaguar.com', '0a1665ce9de14d76920c793f55ab3c47'],
+    ['www.jaguar.es/ownership', 'd2ece2b7471f4f00bf7440d8b5ecba1d'],
+    ['www.jaguar.es/about-jaguar', 'd1d1f14e4b8a45b3b7371d04b7a3372f'],
+    ['www.jaguar.es/electrification', 'a7573f46dad54805a72cd8eb6b941935'],
+    ['www.jaguar.es/experience-jaguar', '5ab0ed7276584beeac9faf842cca4aef'],
+    ['rules.config.jaguar.com/jdx/es_es', '6a4ee69d997d48ab84271e2f8c17c053'],
+    ['rules.config.jaguar.com/jdx/es_es/xe', '6e38383a82684af9b1e850b3fb58bb3d'],
+    ['rules.config.jaguar.com/jdx/es_es/cj_jscwl01b', 'a7fd2ea5604542ac9a480852eda36f50'],
+    ['rules.config.jaguar.com/jdx/es_es/xf', '851ad6ab7c1b406c848bc1f0a87dbd1d'],
+    ['rules.config.jaguar.com/jdx/es_es/f-pace', 'a5c844789a1d491781f4c805b54f22d1'],
+    ['rules.config.jaguar.com/jdx/es_es/f-type', '2f45a4a83fa84417a480c7d041e78c48'],
+    ['www.jaguar.es/retailer-locator', 'f2d192c82c5546c7837ca6b532477d3d'],
+    ['www.jaguar.es/news', '5b090627427247e2b971da000abaf364'],
+    ['jdxforms.jaguar.com/jaguar-es-es/servlet/SmartForm.html', '98490f08567b4dab912105de29e318ed'],
+    ['jdxforms.jaguar.com/jaguar-es-es/confirmation.htm', '5bb8126d488e4c948ee258cb4151a202'],
+    ['www.infojaguar.es/C2C-fpace-julio16', '97e8f8d444844de7a37a10120ec53fa3'],
+    ['www.infojaguar.es/C2Cxe_junio16', '6092943e7af648ffa4c0f4e81dbe55cc'],
+    ['www.infojaguar.es/C2Cxf_junio16', '1602b692fe7f417b9a9f427e7f54f9e1'],
+    ['www.landrover.es/vehicles/range-rover/', 'dfc61f5111714ca099d847bd14b45d30'],
+    ['www.landrover.es/vehicles/range-rover-sport', '2f3c2ffe5cb745068e176f7322dcfe5a'],
+    ['www.landrover.es/vehicles/range-rover-velar', '6ef66c942ef049d8856059d1cc98ba0e'],
+    ['www.landrover.es/vehicles/range-rover-evoque', '65b0b6e873d64055a4a465cf1eae1a3d'],
+    ['www.landrover.es/vehicles/discovery/', '3a7fc9847d56465dace9f4aab581a5e6'],
+    ['www.landrover.es/vehicles/discovery-sport', '638db4d4787249b3b656c34fd79ccbc1'],
+    ['www.landrover.es/special-vehicle-operations', '3ba283712b41413a833d92ba4bac0e26'],
+    ['www.landrover.es/build-your-own/index.html', '65c6a3d8a22f4f7e87836c433600dbbf'],
+    ['www.landrover.es/offers-and-finance/', 'af2e01362ea74d96a083f13315bf1f91'],
+    ['approved.es.landrover.com', 'dac7569887cb431eb19f00a2d6607d2e'],
+    ['www.landrover.es/ownership', 'bb293717cc5a478584a07512352c7aed'],
+    ['www.landrover.es/experiences', 'edd45f7c06034134b2720bf8104fc4a7'],
+    ['www.landrover.es/explore-land-rover', 'b6ee0a5122634a77869401661525e40b'],
+    ['rules.config.landrover.com/jdxl/es_es', '732c194c2ff345e3b12a0a1e3d5d079b'],
+    ['rules.config.landrover.com/jdxl/es_es/l405', 'c667663ef2d6425492a37f3d248be13f'],
+    ['rules.config.landrover.com/jdxl/es_es/l494', 'a24cdf8b99494e4c8003eb6d0a9d0a17'],
+    ['buildyour.landrover.com/lr2/r/model/_/es_es/l560', '08802b3970d54f8587849232bdb103e7'],
+    ['rules.config.landrover.com/jdxl/es_es/l538', 'ebdf102c812d45689a9abd191b0154c6'],
+    ['rules.config.landrover.com/jdxl/es_es/l462', 'd77b52f780fc4ff99ac8ed020a4b21d0'],
+    ['rules.config.landrover.com/jdxl/es_es/l550', '9d3cf59c1db74390a71d4c652cd6383d'],
+    ['www.landrover.es/fleet-and-business', 'c012c0f351b44e668ca56acb26199012'],
+    ['www.landrover.es/experiences/news', '4a813d22b59541ee9e0f2eba160932e1'],
+    ['www.infolandrover.es/c2c_discovery_sport16', '8ef7233e5396448daf101412c27d3f2e'],
+    ['www.infolandrover.es/c2c_evoque16', 'd563c110fd494263a26b3c022645d4ef'],
+    ['www.infolandrover.es/c2c-ofertas-2016', '10eaf820e7f546cba09d11b7a8a3e8c2'],
+    ['lrdxforms.landrover.com/lr-es-es/confirmation.htm', 'd0206a5e3c24418e9efbc8b6ea77a6da'],
+    ['www.jaguar.de/jaguar-modelle/xe/', '6b885e37811c488ba81ee714a68040a5'],
+    ['www.jaguar.de/jaguar-modelle/xf/', 'cf0f75c38779440baaa0013cf2d534f9'],
+    ['www.jaguar.de/jaguar-modelle/xj/', '341ac69ee06d45869c2fc38c57846586'],
+    ['www.jaguar.de/jaguar-modelle/f-pace/', '1670319553c3459582cc69baefb3e759'],
+    ['www.jaguar.de/jaguar-modelle/f-type/', '92f708f2bb8b466a9874390630c2d8cc'],
+    ['www.jaguar.de/jaguar-modelle/i-pace-concept-car/', 'dbcfecc8e31146d09cc99992edda3fe7'],
+    ['www.jaguar.de/jaguar-modelle/', 'aad4d7e7aa504e9d9222ef8dc11a9134'],
+    ['www.jaguar.de/leasing-und-angebote/', '84d4c7fe37d54a87957b93947330e1c5'],
+    ['approved.jaguar.de/', 'bea9af123be5433093d136f9bc1fd8ea'],
+    ['www.jaguar.de/gebrauchtwagen/', 'bea9af123be5433093d136f9bc1fd8ea'],
+    ['www.jaguar.de/service-und-zubehor/', 'e9e0048d6ebb4bb2ab617bc7515e8ffd'],
+    ['www.jaguar.de/ueber-jaguar/', '7c0093d066a447bd9b12d7473cd67c62'],
+    ['www.jaguar.de/electrification/', '284d5dc4dad24933b61ffe29d7a106c4'],
+    ['www.jaguar.de/jaguar-live/', 'a9bbbc0d44c5472cb5c987e5dbfb5620'],
+    ['rules.config.jaguar.com/jdx/de_de/', 'f6b1a3046c6e412d93005e65f3774845'],
+    ['rules.config.jaguar.com/jdx/de_de/xe', 'd04103ae499f47e9977a37183142757c'],
+    ['rules.config.jaguar.com/jdx/de_de/cj_jscwl01b', 'c970287fa9b84583bd63e5cc8ac6c528'],
+    ['rules.config.jaguar.com/jdx/de_de/xf', 'aa815c27c878464c8182819ae410adc2'],
+    ['rules.config.jaguar.com/jdx/de_de/f-pace', '7207f40a74b749aa97b2b6a2cd7fb805'],
+    ['rules.config.jaguar.com/jdx/de_de/f-type', '4793384410f345f8849dba898787b41a'],
+    ['www.jaguar.de/retailer-locator/', '7148f000ef7b496db50d40cc66f79a6a'],
+    ['media.jaguar.com/de-de', '028f2b9b873649e988f0b61ac486908b'],
+    ['www.jaguar.de/kontakt', '03260f7bdc484dcaa39fa1f6318a6e87'],
+    ['www.jaguar-formulare.de/probefahrt', '92e46201802246079063fc25ff6a38f2'],
+    ['www.jaguar-formulare.de/probefahrt/success.php', '77fb481f6dc64e4cac50b79ace73ec37'],
+    ['www.landrover.de/vehicles/range-rover/', '552bd8614c42468db55babae4831f364'],
+    ['www.landrover.de/vehicles/range-rover-sport/', '49462057f52447289a71caf9a70ac7df'],
+    ['www.landrover.de/vehicles/range-rover-velar/', 'de470664d1824512a1e4ffb4c30408dd'],
+    ['www.landrover.de/vehicles/range-rover-evoque/', 'cbc0330d991b45138406a77acc6a7861'],
+    ['www.landrover.de/vehicles/discovery/', '09935b6f85194adf851a817684a89df9'],
+    ['www.landrover.de/vehicles/discovery-sport/', 'b246c53aac1d4ef9b7724596003f317a'],
+    ['www.landrover.de/special-vehicle-operations/', '5d0bb13aa0a845898e38b27c561d238f'],
+    ['www.landrover.de/build-your-own/index.html', '02d8fd08295648c9b82cab297a583c00'],
+    ['www.landrover.de/finance/', '7c60c3228026443bb05e624202a277c1'],
+    ['www.approved.landrover.de/', '1bb8ed536eca4619a3a7e8f4baf141bf'],
+    ['www.landrover.de/approved-used/', '1bb8ed536eca4619a3a7e8f4baf141bf'],
+    ['www.landrover.de/ownership/', '52b39131de3c4e038f29b6b1d68f3cf0'],
+    ['www.landrover.de/experiences/', 'e805b2c65c864202b7ee7f924eabcf44'],
+    ['www.landrover.de/explore-land-rover/', '14cdcea05bb2486a94feff538a973805'],
+    ['rules.config.landrover.com/jdxl/de_de/', '40f732689c964621a33280296795e560'],
+    ['rules.config.landrover.com/jdxl/de_de/l405', 'e29f5e17a4c44f49bed886daf02f82b7'],
+    ['rules.config.landrover.com/jdxl/de_de/l494', '774076a6735b4f769f6780cc689dc72f'],
+    ['buildyour.landrover.com/lr2/r/model/_/de_de/l560', 'e818b5bd612c422fb299a483516c87bd'],
+    ['rules.config.landrover.com/jdxl/de_de/l538', 'd767732185c74ba6aef02769dc576e9d'],
+    ['rules.config.landrover.com/jdxl/de_de/l462', '4dc18f36bba34f8e8378bb518b5dadfd'],
+    ['rules.config.landrover.com/jdxl/de_de/l550', '9351b4e0082d48acac7f6c875473dd54'],
+    ['www.landrover.de/fleet-and-business/', '26d5ba051f3f4d5bb4982110e5f54e82'],
+    ['www.landrover.de/experiences/news/', 'b2cef93d00a542c3b5e0769c8c956ed3'],
+    ['media.landrover.com/de-de/', 'b2cef93d00a542c3b5e0769c8c956ed3'],
+    ['www.jaguar.it/jaguar-range/xe/', '15e190669bd640c5a340e44c34b28871'],
+    ['www.jaguar.it/jaguar-range/xf/', '1113cacce82e46dd828cd277d5a0839d'],
+    ['www.jaguar.it/jaguar-range/xj/', 'f42e2b129fc54d7d944e2df464fc8d8e'],
+    ['www.jaguar.it/jaguar-range/f-pace/', 'df038d694d50458c87f1a9dca9a9065f'],
+    ['www.jaguar.it/jaguar-range/f-type/', '961d1db7af4845dd86959c334f7c9cc0'],
+    ['www.jaguar.it/jaguar-range/i-pace-concept-car/', '6848257474374716b0df9e7ac0e43fd5'],
+    ['www.jaguar.it/jaguar-range/', 'be18d6d6219f48de86a61760861c0633'],
+    ['www.jaguar.it/offers-and-finance/', 'c15746c6428f4577ae388f46f5ecc95e'],
+    ['www.jaguarapproved.it/', '395d4281e644431da6239714a047158c'],
+    ['www.jaguar.it/ownership/', 'b8e3350ed57a48da8339bd50a1cb9590'],
+    ['www.jaguar.it/about-jaguar/', '063d784ffeb9431c86353038e0de9f6c'],
+    ['www.jaguar.it/electrification/', '3e1d569dc096464c886ab53671f9a601'],
+    ['rules.config.jaguar.com/jdx/it_it/', '615201570a5742ea821f44de30b651ff'],
+    ['rules.config.jaguar.com/jdx/it_it/xe', '68963ff4e2a04a30b1d10ae47e764778'],
+    ['rules.config.jaguar.com/jdx/it_it/cj_jscwl01b', '5fce16f089134a719ceffc7685a0733f'],
+    ['rules.config.jaguar.com/jdx/it_it/xf', '4f0256c5fc7745c2b8e10098ec25df29'],
+    ['rules.config.jaguar.com/jdx/it_it/f-pace', 'beb6b54acf994e738abbda044626fd3d'],
+    ['rules.config.jaguar.com/jdx/it_it/f-type', '49bed1ebca5a419ea5600854298dde79'],
+    ['www.jaguar.it/dealer-locator.html', 'fdd168ac69c548c3886c40d8216a0148'],
+    ['www.jaguar.it/news/', 'fdbb012b5f3b4dd2a59c7b07de52bb3b'],
+    ['www.jaguar.it/fleet-and-business/', '3d68d471c03741fa9efd45bd6b054b78'],
+    ['www.jaguar.it/test-drive.html', '586f9edcd8ed4e9b80a51bf30fb6ba09'],
+    ['www.landrover.it/vehicles/range-rover/', '7dedc32242cb4a4abfcb12be08ebb6ef'],
+    ['www.landrover.it/vehicles/new-range-rover-sport/', '820ac184bdeb441cb9867dd95ad7dd82'],
+    ['www.landrover.it/vehicles/range-rover-velar/', '16e420bdc76c4f1d9770f383948bf43f'],
+    ['www.landrover.it/vehicles/range-rover-evoque/', 'f71ff78a7c02447795b24d42293b29b8'],
+    ['www.landrover.it/vehicles/discovery/', 'ec368b6cb0144d709723ee507d3928fa'],
+    ['www.landrover.it/vehicles/discovery-sport/', '5750671f6ed147c0bc3585f3fc3c758f'],
+    ['www.landrover.it/special-vehicle-operations/', '3e10c660f1934272b21a81b115818a10'],
+    ['www.landrover.it/build-your-own/index.html', 'a7c43fa54e2344aaafc2c2bbfa4dec51'],
+    ['www.landrover.it/offers-and-finance/', 'bb51d439194943368a62b82ae1a9ca43'],
+    ['www.landroverapproved.it/', '267592bffe18482ea34a57ce0cfdd912'],
+    ['www.landrover.it/approved-used/', '267592bffe18482ea34a57ce0cfdd912'],
+    ['www.landrover.it/ownership/', '3449d003cf7644e38c685c7ecd800f43'],
+    ['www.landrover.it/experiences/', '7ba67a9552d04c588d2dcdc1a3a81f49'],
+    ['www.landrover.it/explore-land-rover/', 'c1b022e5d606422ba333ecb234d6d25a'],
+    ['rules.config.landrover.com/jdxl/it_it/', '68b1a4aaa1f44d998c32b45acf76bede'],
+    ['rules.config.landrover.com/jdxl/it_it/l405', 'b08d25f65af048e88812d49f19d125b7'],
+    ['rules.config.landrover.com/jdxl/it_it/l494', 'b2cd9dbb221d435fbb373bc71c3bfb83'],
+    ['buildyour.landrover.com/lr2/r/model/_/it_it/l560', 'a335118aa7e04ab3bc629f7b94ef230d'],
+    ['rules.config.landrover.com/jdxl/it_it/l538', '667b81b443c142afa394025026f7c1ba'],
+    ['rules.config.landrover.com/jdxl/it_it/l462', 'fd1b0c5522264d3daa2fb237be92f825'],
+    ['rules.config.landrover.com/jdxl/it_it/l550', '0ce5487a83004943baad168495f06527'],
+    ['www.landrover.it/fleet-and-business/', 'f10560a252684348bb799d3c0d6db288'],
+    ['www.landrover.it/experiences/news/', '80ca78ff7bf6408ca4f4ca5a6e18bd8c'],
+    ['www.jaguar.nl/jaguar-range/xe/', 'a0261f1e1cb940e9a46e5500054b6a33'],
+    ['www.jaguar.nl/jaguar-range/xf/', 'ed3a2ae5641844a685619bd47b137f65'],
+    ['www.jaguar.nl/jaguar-range/xj/', '8fe32946c09d452ca5c8b6bef8746cb1'],
+    ['www.jaguar.nl/jaguar-range/f-pace/', '1585dc82fa844e46b23cd0d03292a515'],
+    ['www.jaguar.nl/jaguar-range/f-type/', '82ed4e00ca8947b0bc19a4607704c627'],
+    ['www.jaguar.nl/jaguar-range/i-pace-concept-car/', '3e4dd8e3f5f04ad9987ebeb2e0e762fa'],
+    ['www.jaguar.nl/jaguar-range/', '28f953ea8afb48ff9f9eb874349720e1'],
+    ['www.jaguar.nl/offers-and-finance/', 'a41c3339897e43679b7ed92185ea6baf'],
+    ['www.jaguarapproved.nl/', 'eb61efef93504bd2b6d312e0228f3e7c'],
+    ['www.jaguar.nl/approved-used/', 'eb61efef93504bd2b6d312e0228f3e7c'],
+    ['www.jaguar.nl/ownership/', '2d36f1385cd343cbb241834a8a7abb32'],
+    ['www.jaguar.nl/about-jaguar/', '61044af291364ba2ba4975448314abb3'],
+    ['www.jaguar.nl/electrification/', '914a25f181a543f5aa189910015598e3'],
+    ['rules.config.jaguar.com/jdx/nl_nl/', '402c36186001470380b47d57c2ec19b8'],
+    ['rules.config.jaguar.com/jdx/nl_nl/xe', '1fa55fc186b14fc285fe4378c534c3ec'],
+    ['rules.config.jaguar.com/jdx/nl_nl/cj_jscwl01b', '0fa5c15f5ee4473b87824430e09dca2a'],
+    ['rules.config.jaguar.com/jdx/nl_nl/xf', 'd99dcd90d0e94ad8a596180628948558'],
+    ['rules.config.jaguar.com/jdx/nl_nl/f-pace', '5bcd2dd82cd44e7c8be43bcad5931c68'],
+    ['rules.config.jaguar.com/jdx/nl_nl/f-type', '34c5648aca3f43e1bbcad797d9308609'],
+    ['www.jaguar.nl/retailer-locator/', '92da62fea7a54b8d86e3f290c7c9e054'],
+    ['www.jaguar.nl/news/', '4eeb1e7800814a6f80c4addb5d711292'],
+    ['www.jaguar.nl/contact-us/', 'aa031f9fae5a4005a226e3f1e84fa0bc'],
+    ['www.jaguar.nl/fleet-and-business/', '37ef1a5b33834b2e8437cab75ca2e560'],
+    ['www.landrover.nl/vehicles/range-rover/', 'efe5c3f2e3f141d8827477f8a8e67318'],
+    ['www.landrover.nl/vehicles/range-rover-sport/', '4e36c9d2b44d4997879bfb3903b8e0c7'],
+    ['www.landrover.nl/vehicles/range-rover-velar/', '740254962bb4405780e239a00affbfbf'],
+    ['www.landrover.nl/vehicles/range-rover-evoque/', '795d89bf50b84b149f9ffdfa30a156de'],
+    ['www.landrover.nl/vehicles/discovery/', 'd5aa8d0709514549999538aab9876618'],
+    ['www.landrover.nl/vehicles/discovery-sport/', 'c1c3a1e0d95e4936a8ecb354ac6926c0'],
+    ['www.landrover.nl/special-vehicle-operations/', '2cb6ea4b14704b3f9f8bc4748b3993bf'],
+    ['www.landrover.nl/build-your-own/index.html', '5e410cecd33b48f8b9639fe00774cbe6'],
+    ['www.landrover.nl/offers-and-finance/', 'fcd629af88884d028dec04bdec41d5c0'],
+    ['www.landroverapproved.nl/', '66e53ed7689443bca31d72d2dd9b83bc'],
+    ['www.landrover.nl/approved-used/', '66e53ed7689443bca31d72d2dd9b83bc'],
+    ['www.landrover.nl/ownership/', '21000b2a13ec4b61bd31721b3dda8e87'],
+    ['www.landrover.nl/experience/', '5e5f4ce529ad40519478ecaefca74f6a'],
+    ['www.landrover.nl/explore-land-rover/', '600dd719eb7940aebf8c9df03af40410'],
+    ['rules.config.landrover.com/jdxl/nl_nl', 'af52b96882214c01a8d4699f8f586a32'],
+    ['rules.config.landrover.com/jdxl/nl_nl/l405', 'dae60ccb34454378b5c34cab84985708'],
+    ['rules.config.landrover.com/jdxl/nl_nl/l494', '5c57f049ab3c430c98bf8b1db4873c0e'],
+    ['buildyour.landrover.com/lr2/r/model/_/nl_nl/l560', 'e9c1778d509b48a99d9c02c8a7df137b'],
+    ['rules.config.landrover.com/jdxl/nl_nl/l538', 'a1744e78d6064d9ba1237c25d95b3260'],
+    ['rules.config.landrover.com/jdxl/nl_nl/l462', 'fb7b3e1382644f938a90d8029459ed78'],
+    ['rules.config.landrover.com/jdxl/nl_nl/l550', '9f4342ef64e04518a8928af87bc903c7'],
+    ['www.landrover.nl/fleet-and-business/', '90e1fb6b34d34b329b27d773b4de3385'],
+    ['www.landrover.nl/experience/news/', '3a664fc40b5a4499841c50b6028089a9'],
+    ['www.jaguarportugal.pt/jaguar-range/xe/', '35311cac498146b594d59edf29090214'],
+    ['www.jaguarportugal.pt/jaguar-range/xf/', '354dff2201404f3b9f70beb24fd9aa30'],
+    ['www.jaguarportugal.pt/jaguar-range/xj/', '389d3e1cb9af45338961c3f3dd970488'],
+    ['www.jaguarportugal.pt/jaguar-range/f-pace/', '63e5ea6b95ee4647b51108bdc9a59f47'],
+    ['www.jaguarportugal.pt/jaguar-range/f-type/', 'de82de44ff02410588b324c5cb0d0f6b'],
+    ['www.jaguarportugal.pt/jaguar-range/i-pace-concept-car/', '7e847d31e5be4d9dadab3e8206835bc5'],
+    ['www.jaguarportugal.pt/jaguar-range/', '37411d3ea8314fceb7aecefd2121eab3'],
+    ['www.jaguarportugal.pt/offers-and-finance/', '0f6cabb9954d45839f7b4dbdc2b9866a'],
+    ['approved.pt.jaguar.com/', '9c64ecb4112e45189d0310a42647e7db'],
+    ['www.jaguarportugal.pt/approved-used/index.html', '9c64ecb4112e45189d0310a42647e7db'],
+    ['www.jaguarportugal.pt/ownership/', '1756b96aa131470a86aeefe664a877cc'],
+    ['www.jaguarportugal.pt/about-jaguar/', 'e0bd30c7dbb142dc9d65ab0081ef362a'],
+    ['www.jaguarportugal.pt/electrification/', '8cf8b6ba5e10413a98a5d513c845db69'],
+    ['rules.config.jaguar.com/jdx/pt_pt/', '975f8e7fb046497c9f42a6b79a1ccc1f'],
+    ['rules.config.jaguar.com/jdx/pt_pt/xe', '03d216e3df3a451185ef128677c27148'],
+    ['rules.config.jaguar.com/jdx/pt_pt/cj_jscwl01b', '93f9f17c96fe43c3a1a3bc1ede631e73'],
+    ['rules.config.jaguar.com/jdx/pt_pt/xf', 'a753ec1f09bf4202b8c6e31380b79a7d'],
+    ['rules.config.jaguar.com/jdx/pt_pt/f-pace', '78817e4c428e4105b4c3a25e2f6c8f6f'],
+    ['rules.config.jaguar.com/jdx/pt_pt/f-type', '545d865513004557beff191022831dfd'],
+    ['www.jaguarportugal.pt/retailer-locator/', '733631e31d0044b0a7eacb9de1347151'],
+    ['www.jaguarportugal.pt/news/', 'ab65cdf32ad04345b66bcb64144f1b0d'],
+    ['jdxforms.jaguar.com/jaguar-pt-pt/confirmation.htm', 'a834fd475acf49e99048133c89837a64'],
+    ['www.landrover.pt/vehicles/new-range-rover/', 'a3a872843c5b4a568fd7dee46cb8b09e'],
+    ['www.landrover.pt/vehicles/new-range-rover-sport/', '059a652723524ddd8d02e872e9e13ae6'],
+    ['www.landrover.pt/vehicles/range-rover-velar/', '09cb777b48d44463b8a70145b9438203'],
+    ['www.landrover.pt/vehicles/range-rover-evoque/', '5d935326e01d4c62b8b5f70c34d0b9ef'],
+    ['www.landrover.pt/vehicles/discovery/', 'a21ce1cf429d4c6b81d71068c46b33ae'],
+    ['www.landrover.pt/vehicles/discovery-sport/', 'a132399cbf3b4d1fa82e751efe875908'],
+    ['www.landrover.pt/special-vehicle-operations/', 'efa49fecff074d239472b25af2d766da'],
+    ['www.landrover.pt/build-your-own/index.html', '5e1247e7cdec473294f01a9d418f4599'],
+    ['www.landrover.pt/offers-and-finance/', 'd013f4da569f40a9b316d0c89de81b3a'],
+    ['approved.pt.landrover.com/', '31e61bd822434f0e8a813bdf099323e4'],
+    ['www.landrover.pt/approved-used/', '31e61bd822434f0e8a813bdf099323e4'],
+    ['www.landrover.pt/ownership/', 'f67f0d396f574ab5887d492fa806aab0'],
+    ['www.landrover.pt/experiences/', '57592b4c54f2479db767a33603cadf8f'],
+    ['www.landrover.pt/explore-land-rover/', '5634df87f21849199ca5fa5e452885e2'],
+    ['rules.config.landrover.com/jdxl/pt_pt', '6177a0b436d94d1bb135dac5edcd8616'],
+    ['rules.config.landrover.com/jdxl/pt_pt/l405', '49e67d6729b24d7c8a21d6f1145cdc4a'],
+    ['rules.config.landrover.com/jdxl/pt_pt/l494', '944f28b54fc64dd786959ab1c2a71206'],
+    ['buildyour.landrover.com/lr2/r/model/_/pt_pt/l560', '240f13766bc9495683d704917e04d70c'],
+    ['rules.config.landrover.com/jdxl/pt_pt/l538', 'fe91a906aea04488b8349d5a76f7b46f'],
+    ['rules.config.landrover.com/jdxl/pt_pt/l462', 'c70bd85b4b1c4713ad91ae6bd9f265bd'],
+    ['rules.config.landrover.com/jdxl/pt_pt/l550', '6e38dbc5c661470cad3d1dacbc435d1f'],
+    ['www.landrover.pt/corporate-sales/', '71c6d6b9d5bc43da9d2369761dd41d7b'],
+    ['www.landrover.pt/experiences/news/', '01b39706b694499c8e7e6caa01adf9e2'],
+    ['www.jaguar.com.au/jaguar-range/xe/', '42f86ac6926748b9a30a0ca4be0a4043'],
+    ['www.jaguar.com.au/jaguar-range/xf/', '444b41bbb2684b8085518a811962a424'],
+    ['www.jaguar.com.au/jaguar-range/xj/', '0b9ba44bf1df495089854b87fa903690'],
+    ['www.jaguar.com.au/jaguar-range/f-pace/', '9db02bbe75a444a6a040190bdfc2c467'],
+    ['www.jaguar.com.au/jaguar-range/f-type/', 'b6a32a2cf9564176939a57e97ffdba4b'],
+    ['www.jaguar.com.au/xk/', '2eb6ff993bf6429fb207633339b37180'],
+    ['www.jaguar.com.au/jaguar-range/i-pace-concept-car/', '6b2e0d803ce44b67a8fb33488752e51b'],
+    ['www.jaguar.com.au/jaguar-range/', '49e684ae9d484e72a68f84aff9b49a93'],
+    ['www.jaguar.com.au/offers-and-finance/', '784b9e3b39b6440aa778aba73ce977be'],
+    ['www.jaguar.com.au/offers-and-finance/jaguar-insurance/', '1faa4e8d78b146bfb118a6c1e18663f2'],
+    ['www.jaguar.com.au/offers-and-finance/jaguar-guaranteed-future-value/', '99485de182ac46dba4415533774aaad8'],
+    ['www.jaguar.com.au/find-and-price/', '3ec82fa243f540e182f9459fc0b5df1f'],
+    ['approved.au.jaguar.com', '87f8e0a4b52040219556849854ae2081'],
+    ['www.jaguar.com.au/ownership/', '6e58626497f5487b979589b58de3104c'],
+    ['www.jaguar.com.au/about-jaguar/', '1fc894e63cc745d2aa3ad0f423678a5b'],
+    ['www.jaguar.com.au/electrification/', 'f7beb49271fb424c8d635efc9974c608'],
+    ['rules.config.jaguar.com/jdx/en_au/', '0ea003404fc74efdb58b41f297970c3d'],
+    ['rules.config.jaguar.com/jdx/en_au/xe', '1b92136be0484dd795bb1b8495ab1d9c'],
+    ['rules.config.jaguar.com/jdx/en_au/cj_jscwl01b', '7ea761ea30b5491e911c99bca2e1c773'],
+    ['rules.config.jaguar.com/jdx/en_au/cj_jscwl01b/3epqt/a-x351swb', '01f4ef67ae374b6286b6f3c146c698a3'],
+    ['rules.config.jaguar.com/jdx/en_au/cj_jscwl01b/3epqt/a-x351lwb', 'c5e11342f5be40c3ab2c38cf96fc4720'],
+    ['rules.config.jaguar.com/jdx/en_au/xf', '1d5e2d4897c44a08bcac6013d6cc0f1b'],
+    ['rules.config.jaguar.com/jdx/en_au/f-pace', '1bdafdd2e5314821a529bc818cc10b74'],
+    ['rules.config.jaguar.com/jdx/en_au/f-type', 'b431924be57a46b7b00315f6a968af3b'],
+    ['rules.config.jaguar.com/jdx/en_au/f-type_k18/3ezl3/a-cecpbs', '0a5e02dbaf7f4bfcabaaabbe21c9823a'],
+    ['rules.config.jaguar.com/jdx/en_au/f-type_k18/3ezl3/a-cecvbs', '72859d2b030c46acb25de46b1aa83a24'],
+    ['www.jaguar.com.au/retailer-locator/', 'b45b65d27b6e44fd83eccd4377941416'],
+    ['www.jaguar.com.au/news/', 'ba02ebf8f8494fbe83c2b964f28849e4'],
+    ['jaguar.webqem.com/driveaway', '6217bf940f24440ca46c3d1a4c2b18ed'],
+    ['jdxforms.jaguar.com/jaguar-au-en/confirmation.htm', '672579df7fd3412b84ff9da22a78139e'],
+    ['www.landrover.com.au/vehicles/range-rover/', '70a0c41f94f44c58bbdbb3ebe0ea762f'],
+    ['www.landrover.com.au/vehicles/range-rover-sport/', 'e85b397e6edf41dc876071b99c0e3fc6'],
+    ['www.landrover.com.au/vehicles/range-rover-velar/', 'ae902abc36cd43718d79544d34f9075f'],
+    ['www.landrover.com.au/vehicles/range-rover-evoque/', 'a7a8f8dd32b345e4b46160de66363530'],
+    ['www.landrover.com.au/vehicles/discovery/', 'dbe4f1294c3b45b4a676e0ba63e5dea7'],
+    ['www.landrover.com.au/vehicles/discovery-sport/', '94c297e34b8241169787d45d47b2e36c'],
+    ['www.landrover.com.au/special-vehicle-operations/', '6ca8d66115f347f5a45176c1cfd876d3'],
+    ['www.landrover.com.au/build-your-own/index.html', 'fd57d1a6e19b4c6fb05e9a8013eb25b8'],
+    ['www.landrover.com.au/offers-and-finance/', '1585f63e46124497b13cc0566378c8a3'],
+    ['approved.au.landrover.com', '439fe355374942efae378758ef75801e'],
+    ['www.landrover.com.au/ownership/', '425f9642734c4977ab4fee8d26adc871'],
+    ['www.landrover.com.au/experiences/', 'f186858310864586b613653312bfe620'],
+    ['www.landrover.com.au/explore-land-rover/', '44450ba36a534084984a569a3caf6763'],
+    ['rules.config.landrover.com/jdxl/en_au', '312bf46aa120408890ee2f71a581f6ea'],
+    ['rules.config.landrover.com/jdxl/en_au/l405', 'eeb89a827b13480fa0da51b854bf455f'],
+    ['rules.config.landrover.com/jdxl/en_au/l405_k17/3f4n9/a-swb/', '68760dfc2bfe44258bf05d454468ecc7'],
+    ['rules.config.landrover.com/jdxl/en_au/l405_k17/3f4n9/_/', '0e39dafb8c554802b6abcbaaa12a6435'],
+    ['rules.config.landrover.com/jdxl/en_au/l494', 'd188228460cd471c95a85d9f7ea74d3a'],
+    ['buildyour.landrover.com/lr2/r/model/_/en_au/l560', 'ae6e4a9fe68b482882a48c2def4cab78'],
+    ['rules.config.landrover.com/jdxl/en_au/l538', '009f6f8d42ed486d9c66d96d6b09c504'],
+    ['rules.config.landrover.com/jdxl/en_au/l538_k17/3f3n1/_/', 'cde0185e56af4c5e85bebf31d89d2d88'],
+    ['rules.config.landrover.com/jdxl/en_au/l462', '651d87cf112a4bf198fa17265965a27e'],
+    ['rules.config.landrover.com/jdxl/en_au/l550', '3875ee8c70b64b8d8e38d0986865d77b'],
+    ['www.landrover.com.au/fleet-and-business/', 'c9ec8cb6e64643389265831b62fc360b'],
+    ['www.landrover.com.au/experiences/news/', '3c4010587e5d4cd0aa787d9987fcf906'],
+    ['landrover.webqem.com/driveaway', 'a69c524e1d924777ba5ce145efcfe8b7'],
+    ['rules.config.landrover.com/jdxl/en_au/l538_k17/3f3n1/a-5door/', '98257546ea244f10ab63aa7f035210d8'],
+    ['www.infolandrover.pt/c2c-ofertas', 'e2274f41fe2c402c8e338882a3a2e559'],
+    ['www.jaguar.co.uk/fleet-and-business/', 'ceeca28fe42647a1af0ea0068a8c1283'],
+    ['www.jaguar.co.uk/jaguar-range/xe', '21f0019707a941da86df705b50d6795b'],
+    ['www.jaguar.co.uk/jaguar-range/xf', 'b39a5c3e494e49958ec7dcf15c754325'],
+    ['www.jaguar.co.uk/jaguar-range/xj', 'ea95358d5c17401ea26aba8b1beb80f5'],
+    ['www.jaguar.co.uk/jaguar-range/f-pace', '1a135a58ea6b4e17a3f8fb09a1c10308'],
+    ['www.jaguar.co.uk/jaguar-range/f-type', 'd475ef51be3142abb5c6c6c931fa78f6'],
+    ['www.jaguar.co.uk/xk', '66f2ab710cdd40e9b5aae6bb6d39c2db'],
+    ['www.jaguar.co.uk/jaguar-range/i-pace-concept-car', '9d0221182fa64da3b873b4e6e3291829'],
+    ['www.jaguar.co.uk/about-jaguar/special-vehicle-operations', '1e73bc91ec3a47fcabac293e4a8d7cb7'],
+    ['www.jaguar.co.uk/jaguar-range', '518b1bc0293e4c90bdcc304c0998a883'],
+    ['www.jaguar.co.uk/fleet-and-business/small-businesses/offers/xe-offers.html', '92815ce764d54aac8002e995251658f9'],
+    ['www.jaguar.co.uk/fleet-and-business/small-businesses/offers/all-new-xf-offers.html', 'c06fcfe800684ff3b69a0a70fa0e9b01'],
+    ['www.jaguar.co.uk/fleet-and-business/small-businesses/offers/xj-offers.html', '3ae72eaa2c104d4aba948271e6312ad8'],
+    ['www.jaguar.co.uk/fleet-and-business/small-businesses/offers/f-type-offers.html', '4022b39ff0404061877c14257850720f'],
+    ['www.jaguar.co.uk/fleet-and-business/small-businesses/offers/f-pace-offers.html', 'e8c4523a5f344badb776669562966b83'],
+    ['financecalculator.jaguar.co.uk/jag/en/gb/fleet', '425c7ad646a2426cbf258035af0501cc'],
+    ['companycartaxcalculator.jaguar.co.uk', 'b92d09a88ef34956952403d73d32bdb8'],
+    ['www.jaguar.co.uk/fleet-and-business/fleet-sales/', 'a26cbd40b37a410c8ce2484196012858'],
+    ['www.jaguar.co.uk/about-jaguar/', '2250013af1684861a2c9979d35118950'],
+    ['www.jaguar.co.uk/electrification/', '745de83fed3741bfacba596603478d37'],
+    ['rules.config.jaguar.com/jdx/en_gb/', '2822071ac4e0456d933ff1be70b89c3b'],
+    ['rules.config.jaguar.com/jdx/en_gb/xe', '7e08a51ee9f04d02ad9628ef4f27b535'],
+    ['rules.config.jaguar.com/jdx/en_gb/cj_jscwl01b', '3a2f2ce2bff34964953936e032f07291'],
+    ['rules.config.jaguar.com/jdx/en_gb/cj_jscwl01b/3f3gm/a-x351swb', '28defae4251c40e78200f92c612ae500'],
+    ['rules.config.jaguar.com/jdx/en_gb/cj_jscwl01b/3f3gm/a-x351lwb', 'a2b2468f5f5b4cbda2f6237af20ce540'],
+    ['rules.config.jaguar.com/jdx/en_gb/xf', 'd798683a60e546c682c83775f46e2925'],
+    ['rules.config.jaguar.com/jdx/en_gb/f-pace', '6faaf7761c2442d9ba50823497aa569d'],
+    ['rules.config.jaguar.com/jdx/en_gb/f-type', '2930838405a74944841181800e8d3ea3'],
+    ['rules.config.jaguar.com/jdx/en_gb/f-type_k18/3f8ou/a-cecpbs', '0ffa47efea664550ad73cf149bdd8c9d'],
+    ['rules.config.jaguar.com/jdx/en_gb/f-type_k18/3f8ou/a-cecvbs', '223c6f0ddda246609689088c7f8ee035'],
+    ['www.jaguar.co.uk/experience-jaguar/', '9a06feda756f4b57b88951b642096896'],
+    ['www.jaguar.co.uk/reviews/', 'ae26076868bc4846a194211a56154995'],
+    ['www.jaguar.co.uk/reviews/f-pace-reviews.html', '02708c4c967e463b90d531bc6d493b7c'],
+    ['www.jaguar.co.uk/reviews/xe-reviews.html', 'd14036f615d842d4b56d94b98b83cb5f'],
+    ['www.jaguar.co.uk/reviews/xf-reviews.html', '76ed477e06db48bc8fc02571913dc9dd'],
+    ['www.jaguar.co.uk/reviews/f-type-reviews.html', '51211ccff8b94be3be711f55abd7cc10'],
+    ['shop.jaguar.com/uk/', 'c2fb3573e2bc4b63aafe83155d6244fc'],
+    ['www.jaguar.co.uk/comparison-tool/index.html', '7967ef79fcfb467d8f91722a64adda2e'],
+    ['www.jaguar.co.uk/request-a-brochure/index.html', '2f1967520d4a4835b1ae52bb57993b40'],
+    ['www.jaguar.co.uk/dealer-locator/', '03fee151ca2b43ffba5a322037d0b5a8'],
+    ['financecalculator.jaguar.co.uk/jag/en/gb/', '058d572ca7014f8882e12cc665211dc1'],
+    ['comparison.jaguar.co.uk', '442b2e6e3b784c6091871fc0f8da9977'],
+    ['www.jaguar.co.uk/news/', 'dfc284f6865e445c8ec15e76ce4784f7'],
+    ['jaguar.webqem.com/driveaway/', 'd8bbcf735fb7476fb0637fdeb95c62e9'],
+    ['jdxforms.jaguar.com/jaguar-gb-en/confirmation.htm', '1aa029b8c02a40059c76c4adb2e5b578'],
+    ['www.landrover.co.uk/vehicles/range-rover/', '997109bf078c4521863de2a921cc9343'],
+    ['www.landrover.co.uk/vehicles/range-rover-sport/', '7f6a4215fbd245159e4b6b27c2081f50'],
+    ['www.landrover.co.uk/vehicles/range-rover-velar/', '03e8f2bf6d8844259d60913f189522b9'],
+    ['www.landrover.co.uk/vehicles/range-rover-evoque/', 'f6736496a3b54f49b570f51e6a4d2340'],
+    ['www.landrover.co.uk/vehicles/discovery/', '1a6ff9f3a6a740ed873eab8f74d66f01'],
+    ['www.landrover.co.uk/vehicles/discovery-sport/', 'ad9d302696a340e4bc2f811535e872ea'],
+    ['www.landrover.co.uk/special-vehicle-operations/', '0034dd774cd448d59eaf9339dd6dbe7b'],
+    ['www.landrover.co.uk/build-your-own/index.html', '2afe1a524f404754898efeb2c4552cbe'],
+    ['www.landrover.co.uk/offers-and-finance/', '2669c66f52b64fe79327a6d7133f0d96'],
+    ['financecalculator.landrover.co.uk/lr/en/gb/models', '60f3d670f5bb45d181757630f22d8ca8'],
+    ['www.usedvehicles.landrover.co.uk/', '91a327237c66423ea7143c1e12033695'],
+    ['www.landrover.co.uk/ownership/', '6dea7ee6e6fb4b7085ec44006b4417b1'],
+    ['www.landrover.co.uk/ownership/service-and-maintenance/', 'bc91b70ce6a24d56945bc7f5eeeda87d'],
+    ['www.landrover.co.uk/ownership/accessories/', '595ce0fc08e449d58430f6ec062a5050'],
+    ['www.landrover.co.uk/ownership/insurance/', '15b8e196cfe343aeba66974663ff6aac'],
+    ['www.landrover.co.uk/experience-landrover/', 'e2f89f4568f14d6e972d5d66baa5ad77'],
+    ['www.landrover.co.uk/explore-land-rover/', 'c8562117b161484dacde58ea2d878ff9'],
+    ['rules.config.landrover.com/jdxl/en_gb', '518384aa510c42ce8b6060ac020267cb'],
+    ['rules.config.landrover.com/jdxl/en_gb/l405', '9544d60b1fcb4dae9cc2609ce21a29aa'],
+    ['rules.config.landrover.com/jdxl/en_gb/l405_k17/3fcg8/a-swb', '23cc26302eac447b9fbdb4ee3752a61c'],
+    ['rules.config.landrover.com/jdxl/en_gb/l405_k17/3fcg8/_', 'a0199aceacbd47ffa7ad5c2406b1ed7e'],
+    ['rules.config.landrover.com/jdxl/en_gb/l494', 'e439392f80824f558291df0bcf78940b'],
+    ['buildyour.landrover.com/lr2/r/model/_/en_gb/l560', '738d3084f9cf4573aab4a1de925d68eb'],
+    ['rules.config.landrover.com/jdxl/en_gb/l538', '182b1bd5d8d242b0929812a26bcb7644'],
+    ['rules.config.landrover.com/jdxl/en_gb/l538_k18/3fejv/a-5door', '9527df2a8a894552b8f8011f7d92d85a'],
+    ['rules.config.landrover.com/jdxl/en_gb/l538_k18/3fejv/_', '5ac1d95ee70e433799381032ab819ff3'],
+    ['rules.config.landrover.com/jdxl/en_gb/l462', '1eb4c94ade4b4a80ab06e122f3061f1b'],
+    ['rules.config.landrover.com/jdxl/en_gb/l550', 'f23956772f9d4381b18c9bd68547a275'],
+    ['www.landrover.co.uk/fleet-and-business/', 'd8129cc44abd4fd0a503e7fdf9428986'],
+    ['companycartaxcalculator.landrover.co.uk/', '653030764d31485284d638dc95d37169'],
+    ['financecalculator.landrover.co.uk/lr/en/gb/fleet', '690106b54bb94315a4946f4a4914280c'],
+    ['companycartaxcomparator.landrover.co.uk', '1511a408e18846c3a0bdf613a274e148'],
+    ['www.landrover.co.uk/explore-land-rover/news/', '5b3fbde059a340399369e6b674092dcf'],
+    ['landrover.webqem.com/driveaway/', '834485885d0548bbbd413b9d2d992eea'],
+    ['shop.landrover.com/', 'd04ba0bf2a1b4d8c9dec4ed4eb16f6a1'],
+    ['www.jaguar.co.uk/offers-and-finance/', '28073a2e7e174531aa98eae151cf0551'],
+    ['www.jaguar.co.uk/offers-and-finance/value-your-car/', 'd706f6fd9c604829bf65198868c6a2f7'],
+    ['www.jaguar.co.uk/ownership/', 'b2c25b1d75e14fd8873016267321ebe0'],
+    ['www.jaguar.co.uk/owners/servicing-maintenance/', '7f7d9a68ddb848ff84037cf073e46f23'],
+    ['www.jaguarusa.com/all-models/xe/', '4641b62e130548fc832ff8ef4b6c4658'],
+    ['www.jaguarusa.com/all-models/xf/', '5dc6515e716247f183bdbf96b10c0174'],
+    ['www.jaguarusa.com/all-models/xj/', 'a61010b6c4d7450bbe595381e9bd781b'],
+    ['www.jaguarusa.com/all-models/e-pace/', '6a69b71122104cd4986d0278dc49ccf1'],
+    ['www.jaguarusa.com/all-models/f-pace/', '39c75b6cac804a8cb154e7c974f91144'],
+    ['www.jaguarusa.com/all-models/f-type/', '9751c33ef2064b65ad531a3c916cce7a'],
+    ['www.jaguarusa.com/xk/', '28d330c2ddb54358831fe453fda95ef5'],
+    ['www.jaguarusa.com/all-models/i-pace-concept-car/', 'dda1ae287e5b46fbb04cda0af2f0a737'],
+    ['www.jaguarusa.com/about-jaguar/special-vehicle-operations/', 'abb139b3f6c84b85859e918d1742845a'],
+    ['www.jaguarusa.com/all-models/', '8fd7a519cce84c0a9fd9cb82248b2002'],
+    ['www.jaguarusa.com/current-offers/', '61a2978a5bed4a3c817ef6b1f1840f76'],
+    ['www.jaguarusa.com/certified-preowned/', '7548e95cfb8747b7b33353ad7969f1a1'],
+    ['www.used.jaguarusa.com', '7548e95cfb8747b7b33353ad7969f1a1'],
+    ['www.jaguarusa.com/owners/', 'd7ed07ccfaf444df8839dfbd3a3bfe77'],
+    ['www.jaguarusa.com/owners/incontrol/', '27d06324508749d89675a94bd0302253'],
+    ['www.jaguarusa.com/owners/how-to-videos/', '6c3af6fe53b3416d89587879e6560fec'],
+    ['www.jaguarusa.com/owners/accessories/', '04c4da600dc745cb93e0fc605bfb2dbe'],
+    ['www.jaguarusa.com/owners/service-warranties/', 'd2e38f83ae9f4562921220e07f0f3218'],
+    ['www.jaguarusa.com/owners/handoverencore/', '92b33cb7b1f842de90a96f0f6c7ecd62'],
+    ['www.jaguarusa.com/fleet-and-business/', 'd65299af92f94e0c97b994499fc5516c'],
+    ['www.jaguarusa.com/about-jaguar/', '1ff81b9ccaa841d8821a7536c3220903'],
+    ['www.jaguarusa.com/electrification/', '6118c1b16c774d96ade62c3cc8e67acf'],
+    ['rules.config.jaguar.com/jdx/en_us/', '851a40efc98e434589ba79ec6607bc46'],
+    ['rules.config.jaguar.com/jdx/en_us/xe_k18', '4201d1d35a094589a838470ad6e24bd5'],
+    ['rules.config.jaguar.com/jdx/en_us/cj_jscwl01b', '73d70e486586455c84f27a16f97e140d'],
+    ['rules.config.jaguar.com/jdx/en_us/cj_jscwl01b/3fhzi/a-x351swb', 'ab5cf4ba9d4542878eebac95ce6954f5'],
+    ['rules.config.jaguar.com/jdx/en_us/cj_jscwl01b/3fhzi/a-x351lwb', '456d242485ff4c2698e95e8cc0d8e5f9'],
+    ['rules.config.jaguar.com/jdx/en_us/xf_k18', 'c4858349c6e94559a790902b5bc66df7'],
+    ['rules.config.jaguar.com/jdx/en_us/xfsb_k18/3fjm5', '1418e028a4e245b9812b4400fe20740a'],
+    ['rules.config.jaguar.com/jdx/en_us/f-pace_k18', '78592c354dc04eb8943794e9eeb1baf8'],
+    ['rules.config.jaguar.com/jdx/en_us/f-type_k18', '8d707eaa13294934ab3f400c9445f964'],
+    ['rules.config.jaguar.com/jdx/en_us/f-type_k18/3fjh4/a-cecpbs', 'e10771a3b0cb4be18bfc1e24d497c1f2'],
+    ['rules.config.jaguar.com/jdx/en_us/f-type_k18/3fjh4/a-cecvbs', 'a7952447b7dd4d19805cc8ce1914459f'],
+    ['buildyour.jaguar.com/jag2', '628bccc15c06485eae52e21a9d880f69'],
+    ['buildyour.jaguar.com/e-pace_k18/', '628bccc15c06485eae52e21a9d880f69'],
+    ['www.jaguarusa.com/experience-jaguar/', '26be2f73a04742fb828038db09957ca3'],
+    ['www.jaguarusa.com/reviews/', '1592ba7219414df99825741574ce1392'],
+    ['www.jaguarusa.com/all-models/f-pace/reviews/', '30d337c854974663aac5c057a1f7bf97'],
+    ['www.jaguarusa.com/all-models/xe/reviews/', '558ae31454804010aec9e0c38f630ff9'],
+    ['www.jaguarusa.com/all-models/xf/reviews/', '171c3d7eafe04607abc1fcaa3e7a8e6f'],
+    ['www.jaguarusa.com/all-models/xj/reviews/', 'da5af90985814694b74149fc1eab5eab'],
+    ['www.jaguarusa.com/all-models/f-type/reviews/', '13852d18478844368db1f063c5072114'],
+    ['new.jaguarusa.com', 'c8224e63103543ae880fce8d4f143fc3'],
+    ['shop.jaguarusa.com', '70dcf3d158d94798b885075c6bbf72d7'],
+    ['www.jlrforms.com/forms/locate-retailer/', '88662defd24f4648876c15c4f9067e7d'],
+    ['www.jaguarusa.com/news/', 'dae99e0a1aed4c06b75b320197a07fc7'],
+    ['financecalculator.jaguarusa.com/jag/en/us/', '50d95f02f08845c88101cee7a47557b3'],
+    ['www.jlrforms.com/forms/jdx-raq/', '8814fe2475134c95a1e58ec3cc2eefda'],
+    ['www.jaguar.at/jaguar-range/xe/', '80162d1aabba4bc7b1773dc4ecb08d9d'],
+    ['www.jaguar.at/jaguar-range/xf/', 'ea4afc457b0143f48aad65fd0758de71'],
+    ['www.jaguar.at/jaguar-range/xj/', '6c094a381a144109b7c92ca4a700bffb'],
+    ['www.jaguar.at/jaguar-range/f-pace/', '65d7d8d6f19a4518b3b284e0050cf273'],
+    ['www.jaguar.at/jaguar-range/f-type/', 'b0b5099176824a5693a8c1ec9afcfd76'],
+    ['www.jaguar.at/jaguar-range/i-pace-concept-car/', 'd18d663b077641859e2d8759c0dad443'],
+    ['www.jaguar.at/jaguar-range/e-pace/', '850af4b0d5d4465ea6228b6903fb33bd'],
+    ['www.jaguar.at/jaguar-range/', 'efe5721c3f2a4e139620f3bbde19009c'],
+    ['www.jaguar.at/build-yours/', '4c0280af495f4db5bd6b7fc1ce7fbb52'],
+    ['approved.at.jaguar.com', 'b6ec6dd2970f460887661bd33d2a629b'],
+    ['www.jaguar.at/approved-used/', 'b6ec6dd2970f460887661bd33d2a629b'],
+    ['www.jaguar.at/ownership/', '6f9a89e2fb004f15956e5dc2751a9014'],
+    ['www.jaguar.at/ownership/service-warranties/', '2d30f4318ca94c0aa425a76dabc4dbde'],
+    ['www.jaguar.at/ownership/insurance/', 'fce22e49254e4bfeaf9b256b7ad7b5d4'],
+    ['www.jaguar.at/ownership/jaguar-care/', 'f1447bb708944d5799d9e5834c7fd402'],
+    ['www.jaguar.at/ownership/accessories/', '097664865c804c14a8077781917acc31'],
+    ['www.jaguar.at/ownership/handbooks-guides/', 'aea571ce2a864e73afc6e676660f0597'],
+    ['www.jaguar.at/ownership/all-wheel-drive/', '31cbdd0e3bbb4d30a1d66bb382bd5c0d'],
+    ['www.jaguar.at/incontrol/', '94aa914402ac4c36bc53a5e30c075db7'],
+    ['www.jaguar.at/about-jaguar/', '4e84a417c20f4d7ab0e6fbb4314a916a'],
+    ['www.jaguar.at/electrification/', '06e0939050d0413f91f9061e2b0acbc0'],
+    ['www.jaguar.at/jaguar-live/', '5317a200b3ff4629b22ab0c1912d86ce'],
+    ['rules.config.jaguar.com/jdx/de_at/', '87aea3500f3e47f4ad95fe55a5ebaf20'],
+    ['rules.config.jaguar.com/jdx/de_at/xe', '35b6078ed6cc4b5781c552935255e3b2'],
+    ['rules.config.jaguar.com/jdx/de_at/cj_k18', '26b3f7b3a2fc470c815cc38b1eb7c801'],
+    ['rules.config.jaguar.com/jdx/de_at/cj_k18/3fm62/a-x351swb', 'b4c7c777546c4e54aa327a3a4c6e98d5'],
+    ['rules.config.jaguar.com/jdx/de_at/cj_k18/3fm62/a-30d_a-jt3_a-x351lwb', '6b8e5afc24294f7089a84f802933762b'],
+    ['rules.config.jaguar.com/jdx/de_at/xf', 'c6b5d485455443bda8d48fd1df762f1e'],
+    ['rules.config.jaguar.com/jdx/de_at/xfsb', 'dfa8982146b94104bcdf8f010efa55d2'],
+    ['rules.config.jaguar.com/jdx/de_at/f-pace', '97b9d3441a654bb7b635fb2f45fe7fa3'],
+    ['rules.config.jaguar.com/jdx/de_de/f-type', '830311ccc6e546eba5db0572f8e49bff'],
+    ['rules.config.jaguar.com/jdx/de_at/f-type_k18/3fg35/a-cecpbs', '46b99443fa144d588b297f559ada784a'],
+    ['rules.config.jaguar.com/jdx/de_at/f-type_k18/3fg35/a-cecvbs', 'c136f1b4d57c46f585f0f3b9207d1721'],
+    ['https://www.jaguar.at/comparison-tool/', '353ec88e57d54f358c39765b490d3591'],
+    ['https://www.jaguar.at/retailer-locator/', '2873b467e4fd4bb3b9ce34673f91fb4b'],
+    ['media.jaguar.com/de-de', 'ebaf1731ec3d4a14a55bd1e3012ca740'],
+    ['www.jaguar.at/kontakt/', '420637e042774343b61f6a2b2370e5f0'],
+    ['www.landrover.at/vehicles/range-rover/', '86b5e9c1b8dc481c948faef550dbd17b'],
+    ['www.landrover.at/vehicles/range-rover-sport/', 'd2a6d9e9275f4fb78bbe945e3ac2540a'],
+    ['www.landrover.at/vehicles/range-rover-velar/', 'bbc67a9adf97422198581ee9a08fba4b'],
+    ['www.landrover.at/vehicles/range-rover-evoque/', 'cb1477f1b63e4414ad778156ae8dcf13'],
+    ['www.landrover.at/vehicles/discovery/', 'becf8c42346a4578a3dc8a9dea88d373'],
+    ['www.landrover.at/vehicles/discovery-sport/', 'd999ae60a718441e97319737f0785625'],
+    ['www.landrover.at/special-vehicle-operations/', '635be3b9d66045328a3f946ef9b9543e'],
+    ['www.landrover.at/build-your-own/index.html', 'dfd056a794c5441199f8584d840cce08'],
+    ['www.landrover.at/offers-and-finance/', '8cd07a295aab4558859a4d40f9cb848b'],
+    ['www.landrover.at/offers-and-finance/credit/', 'e077e0c1896b44a79d207737d56a99b4'],
+    ['www.landrover.at/offers-and-finance/leasing/', 'cee65f9cd8f24c029700308dd4b49a72'],
+    ['www.landrover.at/offers-and-finance/finance-contact/', '1864870d8af84c2c843bb576765879df'],
+    ['www.landrover.at/offers-and-finance/leasingangebote/', '25802e034c544d2580d9a02536979a82'],
+    ['approved.at.landrover.com', '689ccc68bad74250b2d127bb139baf1e'],
+    ['www.landrover.at/approved-used/', '689ccc68bad74250b2d127bb139baf1e'],
+    ['www.landrover.at/ownership/', 'a6bd428a855d40d0903ff99c3e1f6970'],
+    ['www.landrover.at/ownership/guides-and-manuals/', '158e5f6e4ed64b618d69e4d831f7339e'],
+    ['www.landrover.at/ownership/incontrol/', '23dd3d66dc3b4eaab636cd5a589b26f6'],
+    ['www.landrover.at/ownership/adblue.html', 'ceff0df074dd47eb994976b032f1b7b6'],
+    ['www.landrover.at/ownership/castrol-oil/', 'c3319b47955f4d4d99386d8786ec767f'],
+    ['www.landrover.at/ownership/takeback-and-recycle/', 'd5405964fe34486b86d5e6cccd63c09d'],
+    ['www.landrover.at/ownership/dealers/', 'b54a8ccebc40480b92e76470c42aff5a'],
+    ['www.landrover.at/ownership/service-und-wartung/', 'ef15b89f3cf646b98d619f0faec28fed'],
+    ['www.landrover.at/experiences/', '760c867b29a54ef68190b67775539650'],
+    ['www.landrover.at/experiences/sponsorship/', 'd80a6fb1891140899f39c9428d57b859'],
+    ['www.landrover.at/experiences/ambassadors/', 'd4b58ba4acf24c76b7cb0dacf1ba3c49'],
+    ['www.landrover.at/explore-land-rover/', 'e6b9b58a0db442d1a5ee7c5d15979ac5'],
+    ['rules.config.landrover.com/jdxl/de_de/', 'a2f65f12a9944494929313c9d6a8980d'],
+    ['rules.config.landrover.com/jdxl/de_de/l405', '15d0cd4104cf4daab0cab75a5f550562'],
+    ['rules.config.landrover.com/jdxl/de_de/l494', '65ae308ff82044e8afd786f8c80ac246'],
+    ['buildyour.landrover.com/lr2/r/model/_/de_de/l560', '28427f8cd35c4445a165cc9e244586c9'],
+    ['rules.config.landrover.com/jdxl/de_de/l538', '3924b4a1641b45918d9a84142e76c3ee'],
+    ['rules.config.landrover.com/jdxl/de_de/l462', 'cf3d98a6d9e4436b858a4ebc56530725'],
+    ['rules.config.landrover.com/jdxl/de_de/l550', '154f1ac79b174e48830b1897bfa5cab3'],
+    ['www.landrover.at/fleet-and-business/', 'c65e0aa375474f4dbc414237cd2b6689'],
+    ['www.landrover.at/experiences/news/', 'e0e2c2ff50924a4dadf9b8089a8e0a70'],
+    ['buildyour.landrover.com/lr2/r/summary/_/es_es/', '769b5176c4274148a9bb60647e225661'],
+    ['buildyour.landrover.com/lr2/r/summary/_/de_de/', '5600ff3c1e94445eb947d9452f48341b'],
+    ['buildyour.landrover.com/lr2/r/summary/_/it_it/', 'd7371441244047bd88767e0b5d3bb547'],
+    ['buildyour.landrover.com/lr2/r/summary/_/nl_nl/', '66e961908f7345ac81653ede0fb0f834'],
+    ['buildyour.landrover.com/lr2/r/summary/_/pt_pt/', '66f8a0ec24e044bba5561ee4325d35ea'],
+    ['buildyour.landrover.com/lr2/r/summary/_/au_au/', '1f9de1e6ddf242ac8570f4d21cfbe0ef'],
+    ['buildyour.landrover.com/lr2/r/summary/_/en_gb/', '32ad0871a9bb4b01952da11cf6766d16'],
+    ['buildyour.landrover.com/lr2/r/summary/_/en_us/', '9c7d7fb87cc4468f8b9230d8ec80ded3'],
+    ['www.jaguar.de/jaguar-modelle/e-pace', 'f697899466a74d4e9699184c8beed03d'],
+    ['www.jaguar.be/nl/jaguar-range/xe/', '63f2d353d04747839e9c526cf807b382'],
+    ['www.jaguar.be/fr/jaguar-range/xe/', '63f2d353d04747839e9c526cf807b382'],
+    ['www.jaguar.be/nl/jaguar-range/xf/', '5695dccc03724e7e8b39aec2d6cc7415'],
+    ['www.jaguar.be/fr/jaguar-range/xf/', '5695dccc03724e7e8b39aec2d6cc7415'],
+    ['www.jaguar-formulare.de/probefahrt_xf_xfsb/', '4a4a1e6a1ee04e46ad32b892051bfdd8'],
+    ['www.jaguar.fr/jaguar-range/xe', '144eaf1676124f288117f38e41a7d7d3'],
+    ['www.jaguar.fr/jaguar-range/xf', '4633dd573a4d4352bad7554473c4d82b'],
+    ['www.jaguar.de/fleet-and-business/','e99cba31c46349c9b8248edb04a0c970'],
+    ['www.jaguar.es/fleet-and-business/', '8ee1936a0ba14dacaf4112546e14a0bb'],
+    ['www.jaguar.be/nl/fleet-and-business/', 'cb7eae41bc0e456da6a49e58ff304ba7'],
+    ['www.jaguar.be/fr/fleet-and-business/', 'cb7eae41bc0e456da6a49e58ff304ba7'],
+    ['www.jaguar.fr/fleet-and-business/', '0a3535ee117d43c7a91a31105843582f']
+
+  ];
+
+  var brochureDownloadUrls = {
+    'www.landrover.es/shopping-tools/brochures.html': 'c7e895c84302435a8223e6578e7c2886',
+    'www.jaguar.es/request-a-brochure/index.html': '56e8a490b8e84cab9174772313f7ec3b',
+    'www.jaguar.de/broschuere-anfragen/index.html': '89c5208e36664726967c97026c647028',
+    'www.landrover.de/shopping-tools/brochures.html': '763f8a192ca746b4b6ad8486a0bd9437',
+    'www.jaguar.it/request-a-brochure/index.html': '75dcdba214714fb68d0e07318679c848',
+    'www.landrover.it/shopping-tools/brochures.html': '45e9c18ef9874edb94350fd896b70375',
+    'www.jaguar.nl/request-a-brochure/index.html': 'd88cc586ae3a48ee946503313d87f8bc',
+    'www.landrover.nl/shopping-tools/brochures.html': 'fce00b6b5bd845058ee35ba23abd456c',
+    'www.jaguarportugal.pt/request-a-brochure/index.html': '47975a06269a49a9a9b0215b170fa961',
+    'www.landrover.pt/shopping-tools/brochures.html': '4dbe5e499774400abe174060eda966bc',
+    'www.jaguar.com.au/request-a-brochure/index.html': '9a275a0b26e84dc588f5c4d895fcd9e3',
+    'www.landrover.com.au/shopping-tools/brochures.html': '175ff5e613cc4e2880829e2f16455fa1',
+    'jdxforms.jaguar.com/jaguar-gb-en/servlet/SmartForm.html': '72771a08695e4341b772858f618bbd6c',
+    'lrdxforms.landrover.com/lr-gb-en/servlet/SmartForm.html': '9a8ef75d109c46459b9f9dff5f6ea604',
+    'www.jaguarusa.com/request-a-brochure/index.html': '8493ff8fbeaa45e188a85ccbc030785b',
+    'www.jaguar.at/request-a-brochure/index.html': '6eb01b7acec041f88bb38220c80b6fef',
+    'www.landrover.at/shopping-tools/brochures.html': 'f25ee70f62174b4a88882ab137d7402e',
+    'www.landroverusa.com/shopping-tools/vehicle-brochures.html': 'abe5800f53a341e8be79b0a1e2295a23'
+  };
+
+  // [brand, conversion type (regex), country, pixelid]
+  var conversionUrlArray = [
+    ['jaguar', 'quote$', '/es/', '76175330e4e9408eb1204eee6b3d7c96'],
+    ['jaguar', 'quote$', '/de/', '1126e702fe274796ab1a7de5d549b124'],
+    ['jaguar', 'quote$', '/it/', '510e249571e1483e93f7e6b6ea6d08ba'],
+    ['jaguar', 'quote$', '/nl/', '2081c1d9a460458b8ec5bf6481cd11c0'],
+    ['jaguar', 'quote$', '/pt/', 'b767c86fd6204c2b952aaf25ca16526d'],
+    ['jaguar', 'quote$', '/gb/', 'e10ddfcdb6d14fe1a45dc2b9e837ff9c'],
+    ['jaguar', 'quote$', '/at/', 'bce13d0b7d76478d88b1c9463704735d'],
+    ['jaguar', 'jdxpayoff.html$', '/es_es/', '137d7b821fdd4058b45369a5a27d176d'],
+    ['jaguar', 'jdxpayoff.html$', '/es_es_a11y/', '137d7b821fdd4058b45369a5a27d176d'],
+    ['jaguar', 'jdxpayoff.html$', '/es_es_seatoff/', '137d7b821fdd4058b45369a5a27d176d'],
+    ['jaguar', 'jdxpayoff.html$', '/es_es_hoodup_seatoff/', '137d7b821fdd4058b45369a5a27d176d'],
+    ['jaguar', 'jdxpayoff.html$', '/es_es_hoodup/', '137d7b821fdd4058b45369a5a27d176d'],
+    ['jaguar', 'jdxpayoff.html$', '/es_es_a11y_hoodup_seatoff/', '137d7b821fdd4058b45369a5a27d176d'],
+    ['jaguar', 'jdxpayoff.html$', '/es_es_a11y_hoodup/', '137d7b821fdd4058b45369a5a27d176d'],
+    ['jaguar', 'jdxpayoff.html$', '/de_de/', '63ea448f1f534dd2b9e72fb1603df27c'],
+    ['jaguar', 'jdxpayoff.html$', '/de_de_a11y/', '63ea448f1f534dd2b9e72fb1603df27c'],
+    ['jaguar', 'jdxpayoff.html$', '/de_de_seatoff/', '63ea448f1f534dd2b9e72fb1603df27c'],
+    ['jaguar', 'jdxpayoff.html$', '/de_de_hoodup_seatoff/', '63ea448f1f534dd2b9e72fb1603df27c'],
+    ['jaguar', 'jdxpayoff.html$', '/de_de_hoodup/', '63ea448f1f534dd2b9e72fb1603df27c'],
+    ['jaguar', 'jdxpayoff.html$', '/de_de_a11y_hoodup_seatoff/', '63ea448f1f534dd2b9e72fb1603df27c'],
+    ['jaguar', 'jdxpayoff.html$', '/de_de_a11y_hoodup/', '63ea448f1f534dd2b9e72fb1603df27c'],
+    ['jaguar', 'jdxpayoff.html$', '/it_it/', '55116f01a94f400eb449396b724c6c56'],
+    ['jaguar', 'jdxpayoff.html$', '/it_it_a11y/', '55116f01a94f400eb449396b724c6c56'],
+    ['jaguar', 'jdxpayoff.html$', '/it_it_seatoff/', '55116f01a94f400eb449396b724c6c56'],
+    ['jaguar', 'jdxpayoff.html$', '/it_it_hoodup_seatoff/', '55116f01a94f400eb449396b724c6c56'],
+    ['jaguar', 'jdxpayoff.html$', '/it_it_hoodup/', '55116f01a94f400eb449396b724c6c56'],
+    ['jaguar', 'jdxpayoff.html$', '/it_it_a11y_hoodup_seatoff/', '55116f01a94f400eb449396b724c6c56'],
+    ['jaguar', 'jdxpayoff.html$', '/it_it_a11y_hoodup/', '55116f01a94f400eb449396b724c6c56'],
+    ['jaguar', 'jdxpayoff.html$', '/nl_nl/', '086336db9d05470eac7b815780404329'],
+    ['jaguar', 'jdxpayoff.html$', '/nl_nl_a11y/', '086336db9d05470eac7b815780404329'],
+    ['jaguar', 'jdxpayoff.html$', '/nl_nl_seatoff/', '086336db9d05470eac7b815780404329'],
+    ['jaguar', 'jdxpayoff.html$', '/nl_nl_hoodup_seatoff/', '086336db9d05470eac7b815780404329'],
+    ['jaguar', 'jdxpayoff.html$', '/nl_nl_hoodup/', '086336db9d05470eac7b815780404329'],
+    ['jaguar', 'jdxpayoff.html$', '/nl_nl_a11y_hoodup_seatoff/', '086336db9d05470eac7b815780404329'],
+    ['jaguar', 'jdxpayoff.html$', '/nl_nl_a11y_hoodup/', '086336db9d05470eac7b815780404329'],
+    ['jaguar', 'jdxpayoff.html$', '/pt_pt/', 'e543f12738a74344961ec18c2e93480f'],
+    ['jaguar', 'jdxpayoff.html$', '/pt_pt_a11y/', 'e543f12738a74344961ec18c2e93480f'],
+    ['jaguar', 'jdxpayoff.html$', '/pt_pt_seatoff/', 'e543f12738a74344961ec18c2e93480f'],
+    ['jaguar', 'jdxpayoff.html$', '/pt_pt_hoodup_seatoff/', 'e543f12738a74344961ec18c2e93480f'],
+    ['jaguar', 'jdxpayoff.html$', '/pt_pt_hoodup/', 'e543f12738a74344961ec18c2e93480f'],
+    ['jaguar', 'jdxpayoff.html$', '/pt_pt_a11y_hoodup_seatoff/', 'e543f12738a74344961ec18c2e93480f'],
+    ['jaguar', 'jdxpayoff.html$', '/pt_pt_a11y_hoodup/', 'e543f12738a74344961ec18c2e93480f'],
+    ['jaguar', 'jdxpayoff.html$', '/en_au/', '3149cc5457424463b2c860c33d919733'],
+    ['jaguar', 'jdxpayoff.html$', '/en_au_a11y/', '3149cc5457424463b2c860c33d919733'],
+    ['jaguar', 'jdxpayoff.html$', '/en_au_seatoff/', '3149cc5457424463b2c860c33d919733'],
+    ['jaguar', 'jdxpayoff.html$', '/en_au_hoodup_seatoff/', '3149cc5457424463b2c860c33d919733'],
+    ['jaguar', 'jdxpayoff.html$', '/en_au_hoodup/', '3149cc5457424463b2c860c33d919733'],
+    ['jaguar', 'jdxpayoff.html$', '/en_au_a11y_hoodup_seatoff/', '3149cc5457424463b2c860c33d919733'],
+    ['jaguar', 'jdxpayoff.html$', '/en_au_a11y_hoodup/', '3149cc5457424463b2c860c33d919733'],
+    ['jaguar', 'jdxpayoff.html$', '/en_gb/', '592824c9ac3d4f358d69ff0868178afa'],
+    ['jaguar', 'jdxpayoff.html$', '/en_gb_a11y/', '592824c9ac3d4f358d69ff0868178afa'],
+    ['jaguar', 'jdxpayoff.html$', '/en_gb_seatoff/', '592824c9ac3d4f358d69ff0868178afa'],
+    ['jaguar', 'jdxpayoff.html$', '/en_gb_hoodup_seatoff/', '592824c9ac3d4f358d69ff0868178afa'],
+    ['jaguar', 'jdxpayoff.html$', '/en_gb_hoodup/', '592824c9ac3d4f358d69ff0868178afa'],
+    ['jaguar', 'jdxpayoff.html$', '/en_gb_a11y_hoodup_seatoff/', '592824c9ac3d4f358d69ff0868178afa'],
+    ['jaguar', 'jdxpayoff.html$', '/en_gb_a11y_hoodup/', '592824c9ac3d4f358d69ff0868178afa'],
+    ['jaguar', 'jdxpayoff.html$', '/en_us/', '4fb8a532eaf449f48598987cf3c46fe2'],
+    ['jaguar', 'jdxpayoff.html$', '/en_us_a11y/', '4fb8a532eaf449f48598987cf3c46fe2'],
+    ['jaguar', 'jdxpayoff.html$', '/en_us_seatoff/', '4fb8a532eaf449f48598987cf3c46fe2'],
+    ['jaguar', 'jdxpayoff.html$', '/en_us_hoodup_seatoff/', '4fb8a532eaf449f48598987cf3c46fe2'],
+    ['jaguar', 'jdxpayoff.html$', '/en_us_hoodup/', '4fb8a532eaf449f48598987cf3c46fe2'],
+    ['jaguar', 'jdxpayoff.html$', '/en_us_a11y_hoodup_seatoff/', '4fb8a532eaf449f48598987cf3c46fe2'],
+    ['jaguar', 'jdxpayoff.html$', '/en_us_a11y_hoodup/', '4fb8a532eaf449f48598987cf3c46fe2'],
+    ['jaguar', 'jdxpayoff.html$', '/de_at/', '8814f849a7f842ef9f29ae560e09437e'],
+    ['jaguar', 'jdxpayoff.html$', '/de_at_a11y/', '8814f849a7f842ef9f29ae560e09437e'],
+    ['jaguar', 'jdxpayoff.html$', '/de_at_seatoff/', '8814f849a7f842ef9f29ae560e09437e'],
+    ['jaguar', 'jdxpayoff.html$', '/de_at_hoodup_seatoff/', '8814f849a7f842ef9f29ae560e09437e'],
+    ['jaguar', 'jdxpayoff.html$', '/de_at_hoodup/', '8814f849a7f842ef9f29ae560e09437e'],
+    ['jaguar', 'jdxpayoff.html$', '/de_at_a11y_hoodup_seatoff/', '8814f849a7f842ef9f29ae560e09437e'],
+    ['jaguar', 'jdxpayoff.html$', '/de_at_a11y_hoodup/', '8814f849a7f842ef9f29ae560e09437e'],
+    ['landrover', 'quote$', '/es/', '04530267c619474a808ffb0dafe87dc0'],
+    ['landrover', 'quote$', '/de/', 'a9eca5fdd26a4ee5b2dcda9d0a231da4'],
+    ['landrover', 'quote$', '/it/', 'dd02d3f6761a45a3a25e938a7af447dc'],
+    ['landrover', 'quote$', '/nl/', '4c6910937dcb4e56b457d3291e0485a7'],
+    ['landrover', 'quote$', '/pt/', 'fa323619d740465993f27cbf7c69a809'],
+    ['landrover', 'quote$', '/gb/', '922a2dea93d5403db543952101883912'],
+    ['landrover', 'quote$', '/us/', 'f144d53e29a84b38bc716f33f5049f0a'],
+    ['landrover', 'jdxpayoff.html$', '/es_es/', '769b5176c4274148a9bb60647e225661'],
+    ['landrover', 'jdxpayoff.html$', '/es_es_a11y/', '769b5176c4274148a9bb60647e225661'],
+    ['landrover', 'jdxpayoff.html$', '/es_es_seatoff/', '769b5176c4274148a9bb60647e225661'],
+    ['landrover', 'jdxpayoff.html$', '/es_es_hoodup_seatoff/', '769b5176c4274148a9bb60647e225661'],
+    ['landrover', 'jdxpayoff.html$', '/es_es_hoodup/', '769b5176c4274148a9bb60647e225661'],
+    ['landrover', 'jdxpayoff.html$', '/es_es_a11y_hoodup_seatoff/', '769b5176c4274148a9bb60647e225661'],
+    ['landrover', 'jdxpayoff.html$', '/es_es_a11y_hoodup/', '769b5176c4274148a9bb60647e225661'],
+    ['landrover', 'jdxpayoff.html$', '/de_de/', '5600ff3c1e94445eb947d9452f48341b'],
+    ['landrover', 'jdxpayoff.html$', '/de_de_a11y/', '5600ff3c1e94445eb947d9452f48341b'],
+    ['landrover', 'jdxpayoff.html$', '/de_de_seatoff/', '5600ff3c1e94445eb947d9452f48341b'],
+    ['landrover', 'jdxpayoff.html$', '/de_de_hoodup_seatoff/', '5600ff3c1e94445eb947d9452f48341b'],
+    ['landrover', 'jdxpayoff.html$', '/de_de_hoodup/', '5600ff3c1e94445eb947d9452f48341b'],
+    ['landrover', 'jdxpayoff.html$', '/de_de_a11y_hoodup_seatoff/', '5600ff3c1e94445eb947d9452f48341b'],
+    ['landrover', 'jdxpayoff.html$', '/de_de_a11y_hoodup/', '5600ff3c1e94445eb947d9452f48341b'],
+    ['landrover', 'jdxpayoff.html$', '/it_it/', 'd7371441244047bd88767e0b5d3bb547'],
+    ['landrover', 'jdxpayoff.html$', '/it_it_a11y/', 'd7371441244047bd88767e0b5d3bb547'],
+    ['landrover', 'jdxpayoff.html$', '/it_it_seatoff/', 'd7371441244047bd88767e0b5d3bb547'],
+    ['landrover', 'jdxpayoff.html$', '/it_it_hoodup_seatoff/', 'd7371441244047bd88767e0b5d3bb547'],
+    ['landrover', 'jdxpayoff.html$', '/it_it_hoodup/', 'd7371441244047bd88767e0b5d3bb547'],
+    ['landrover', 'jdxpayoff.html$', '/it_it_a11y_hoodup_seatoff/', 'd7371441244047bd88767e0b5d3bb547'],
+    ['landrover', 'jdxpayoff.html$', '/it_it_a11y_hoodup/', 'd7371441244047bd88767e0b5d3bb547'],
+    ['landrover', 'jdxpayoff.html$', '/nl_nl/', '66e961908f7345ac81653ede0fb0f834'],
+    ['landrover', 'jdxpayoff.html$', '/nl_nl_a11y/', '66e961908f7345ac81653ede0fb0f834'],
+    ['landrover', 'jdxpayoff.html$', '/nl_nl_seatoff/', '66e961908f7345ac81653ede0fb0f834'],
+    ['landrover', 'jdxpayoff.html$', '/nl_nl_hoodup_seatoff/', '66e961908f7345ac81653ede0fb0f834'],
+    ['landrover', 'jdxpayoff.html$', '/nl_nl_hoodup/', '66e961908f7345ac81653ede0fb0f834'],
+    ['landrover', 'jdxpayoff.html$', '/nl_nl_a11y_hoodup_seatoff/', '66e961908f7345ac81653ede0fb0f834'],
+    ['landrover', 'jdxpayoff.html$', '/nl_nl_a11y_hoodup/', '66e961908f7345ac81653ede0fb0f834'],
+    ['landrover', 'jdxpayoff.html$', '/pt_pt/', '66f8a0ec24e044bba5561ee4325d35ea'],
+    ['landrover', 'jdxpayoff.html$', '/pt_pt_a11y/', '66f8a0ec24e044bba5561ee4325d35ea'],
+    ['landrover', 'jdxpayoff.html$', '/pt_pt_seatoff/', '66f8a0ec24e044bba5561ee4325d35ea'],
+    ['landrover', 'jdxpayoff.html$', '/pt_pt_hoodup_seatoff/', '66f8a0ec24e044bba5561ee4325d35ea'],
+    ['landrover', 'jdxpayoff.html$', '/pt_pt_hoodup/', '66f8a0ec24e044bba5561ee4325d35ea'],
+    ['landrover', 'jdxpayoff.html$', '/pt_pt_a11y_hoodup_seatoff/', '66f8a0ec24e044bba5561ee4325d35ea'],
+    ['landrover', 'jdxpayoff.html$', '/pt_pt_a11y_hoodup/', '66f8a0ec24e044bba5561ee4325d35ea'],
+    ['landrover', 'jdxpayoff.html$', '/au_au/', '1f9de1e6ddf242ac8570f4d21cfbe0ef'],
+    ['landrover', 'jdxpayoff.html$', '/au_au_a11y/', '1f9de1e6ddf242ac8570f4d21cfbe0ef'],
+    ['landrover', 'jdxpayoff.html$', '/au_au_seatoff/', '1f9de1e6ddf242ac8570f4d21cfbe0ef'],
+    ['landrover', 'jdxpayoff.html$', '/au_au_hoodup_seatoff/', '1f9de1e6ddf242ac8570f4d21cfbe0ef'],
+    ['landrover', 'jdxpayoff.html$', '/au_au_hoodup/', '1f9de1e6ddf242ac8570f4d21cfbe0ef'],
+    ['landrover', 'jdxpayoff.html$', '/au_au_a11y_hoodup_seatoff/', '1f9de1e6ddf242ac8570f4d21cfbe0ef'],
+    ['landrover', 'jdxpayoff.html$', '/au_au_a11y_hoodup/', '1f9de1e6ddf242ac8570f4d21cfbe0ef'],
+    ['landrover', 'jdxpayoff.html$', '/en_gb/', '32ad0871a9bb4b01952da11cf6766d16'],
+    ['landrover', 'jdxpayoff.html$', '/en_gb_a11y/', '32ad0871a9bb4b01952da11cf6766d16'],
+    ['landrover', 'jdxpayoff.html$', '/en_gb_seatoff/', '32ad0871a9bb4b01952da11cf6766d16'],
+    ['landrover', 'jdxpayoff.html$', '/en_gb_hoodup_seatoff/', '32ad0871a9bb4b01952da11cf6766d16'],
+    ['landrover', 'jdxpayoff.html$', '/en_gb_hoodup/', '32ad0871a9bb4b01952da11cf6766d16'],
+    ['landrover', 'jdxpayoff.html$', '/en_gb_a11y_hoodup_seatoff/', '32ad0871a9bb4b01952da11cf6766d16'],
+    ['landrover', 'jdxpayoff.html$', '/en_gb_a11y_hoodup/', '32ad0871a9bb4b01952da11cf6766d16'],
+    ['landrover', 'jdxpayoff.html$', '/en_us/', '9c7d7fb87cc4468f8b9230d8ec80ded3'],
+    ['landrover', 'jdxpayoff.html$', '/en_us_a11y/', '9c7d7fb87cc4468f8b9230d8ec80ded3'],
+    ['landrover', 'jdxpayoff.html$', '/en_us_seatoff/', '9c7d7fb87cc4468f8b9230d8ec80ded3'],
+    ['landrover', 'jdxpayoff.html$', '/en_us_hoodup_seatoff/', '9c7d7fb87cc4468f8b9230d8ec80ded3'],
+    ['landrover', 'jdxpayoff.html$', '/en_us_hoodup/', '9c7d7fb87cc4468f8b9230d8ec80ded3'],
+    ['landrover', 'jdxpayoff.html$', '/en_us_a11y_hoodup_seatoff/', '9c7d7fb87cc4468f8b9230d8ec80ded3'],
+    ['landrover', 'jdxpayoff.html$', '/en_us_a11y_hoodup/', '9c7d7fb87cc4468f8b9230d8ec80ded3']
+  ];
+
+  /***
+   * Single page workflow.
+   * item[0]: URL of start of car build workflow
+   * item[1]: pixel to fire at start of workflow
+   * item[2]: URL to track as conversion after buttons are clicked through
+   * item[3]: pixel to fire to track conversion
+   **/
+  var singlePageCarBuilds = [
+    [ 'buildyour.jaguar.com/jag2/r/model/_/pt_pt/e-pace/3eyzm',
+      '8918599b8fc944afbd1fb21eea904661',
+      'buildyour.jaguar.com/jag2/r/summary/_/pt_pt',
+      'e543f12738a74344961ec18c2e93480f'
+    ],
+    [
+      'buildyour.jaguar.com/jag2/r/model/_/de_de/e-pace/3esbi',
+      '4eb3f06913e643c29e230e7083704398',
+      'buildyour.jaguar.com/jag2/r/summary/_/de_de',
+      '63ea448f1f534dd2b9e72fb1603df27c'
+    ]
+  ]
+
+  var testDriveArray = [
+    ['jaguarlandrover.emsecure.net/optiext/optiextension.dll','ID=SepSlEIhXHPpWx7cJftz28qfFDAwbzhdhT0Ndf2k28SS7Gq8CqKjX4eXcN8sAX%2BPklpSaej_8OGjEB4tGZ','20ed634664d8448bbc09d2a81f2e3378'],
+    ['jaguarlandrover.emsecure.net/optiext/optiextension.dll','ID=jHQjPM5ai6nKqccBomxpLIFgW7tOvWdySgyP%2BoD5NbNUytgz4t20sbzTt13V68SRmMwRB7M6TR_JEdt45s','68c2a1c56f974c28abcc175fb502dce4'],
+    ['jdxforms.jaguar.com/jaguar-au-en/servlet/SmartForm.html','formCode=jag-cu-au-en','be4db5b974ce4bb39c705e4a2a50466c'],
+    ['jdxforms.jaguar.com/jaguar-au-en/servlet/SmartForm.html','formCode=jag-td1-au-en','2c554fd464a84390924bc4742509108f'],
+    ['jdxforms.jaguar.com/jaguar-au-en/servlet/SmartForm.html','formCode=jag-kmi-au-en','9aed9df8a35d4c77a29e171dee4d8eb7'],
+    ['lrdxforms.landrover.com/lr-au-en/servlet/SmartForm.html','formCode=lr-td1-au-en','935e4041e7494bcdad60ba321ddddc79'],
+    ['lrdxforms.landrover.com/lr-au-en/servlet/SmartForm.html','formCode=lr-kmi-au-en','700d0fe2af6a4272a5cfe29f17830bd6'],
+    ['lrdxforms.landrover.com/lr-au-en/servlet/SmartForm.html','formCode=lr-cu-au-en','5e9990beab3c46e1a4f27a6dfb5fe830'],
+    ['lrdxforms.landrover.com/lr-au-en/servlet/SmartForm.html','formCode=lr-pb-au-en','b8949f780c3045429c25e511bab9f2b4'],
+    ['lrdxforms.landrover.com/lr-pt-pt/servlet/SmartForm.html','formCode=lr-td-pt-pt','5b77334236b24b0fb1af334b54c97d1d'],
+    ['lrdxforms.landrover.com/lr-pt-pt/servlet/SmartForm.html','formCode=lr-kmi-pt-pt','35eb2bc9470240a3916dc891cab27e93'],
+    ['lrdxforms.landrover.com/lr-gb-en/servlet/SmartForm.html','formCode=lr-td2-gb-en','d0799029c9e342859162d4e1e0e75fef'],
+    ['jdxforms.jaguar.com/jaguar-pt-pt/servlet/SmartForm.html','formCode=jag-cu-pt-pt','b8e946cc52154110a157f43f6c4c9178'],
+    ['jdxforms.jaguar.com/jaguar-pt-pt/servlet/SmartForm.html','formCode=jag-td-pt-pt','7aaeca997f1d43eb9c3f38f4924c1fa3'],
+    ['jdxforms.jaguar.com/jaguar-gb-en/servlet/SmartForm.html','formCode=jag-td2-gb-en','e6531758f7e24e3ebca021242c8b9c21'],
+    ['jdxforms.jaguar.com/jaguar-gb-en/servlet/SmartForm.html','formCode=jag-kmi2-gb-en','68f242ec6be74cc4a62b6fc8a3a4a4fa'],
+    ['jdxforms.jaguar.com/jaguar-gb-en/servlet/SmartForm.html','formCode=jag-cu2-gb-en','75dcc865347d482e8f2a6484f9c4bbab'],
+    ['jdxforms.jaguar.com/jaguar-gb-en/servlet/SmartForm.html','formCode=jag-bd2-gb-en','e3d4c7d883dd48fc86bc9db65932c827'],
+    ['lrdxforms.landrover.com/lr-gb-en/servlet/SmartForm.html','formCode=lr-kmi2-gb-en','49864135eb604bd992c0cd166153f279'],
+    ['lrdxforms.landrover.com/lr-gb-en/servlet/SmartForm.html','formCode=lr-bd2-gb-en','9d165faa4db54874832bb802e3b18390'],
+    ['www.jaguar-formulare.de/angebote/flexleasing','formCode=jag-raq-de-de','2e1b44ff5ec34ef6bfbe2c2d0101d1a3'],
+    ['www.landrover-formulare.de/angebote/flexleasing','formCode=lr-td-de-de','fd002b39ddf54d9ea2ceef810c24bb52'],
+    ['www.jlrforms.com/forms/jdx-td/', 'thankyou=true', 'a61d3d2a3bb04b4da6364fd7f2c16a2d'],
+    ['www.jlrforms.com/forms/jdx-raq/', 'thankyou=true', 'bce62e1f0ffd4b34b4c7ac5a213b6fb4'],
+    ['www.jlrforms.com/forms/lrdx-td/', 'thankyou=true', '33c3aff27edd477e93c79fa98a2555f0'],
+    ['www.jlrforms.com/forms/lrdx-raq/', 'thankyou=true', '9f30addc4d12405599aa7cc6ebdfacf0'],
+    ['www.jlrforms.com/forms/lrdx-kmi/', 'thankyou=true', '37fe7f4b70224c9e9207cc75860d5837'],
+    ['jdxforms.jaguar.com/jaguar-at-de/servlet/SmartForm.html', 'formCode=jag-kmi-at-de', 'a6e4b1d7a0fc403dba0dfb1aba05473f'],
+    ['www.jaguar-at.at/probefahrt', 'formCode=jag-td-at-de', '85b61a5af6514b73bebe015b468cf4f8'],
+    ['landrover-at.at/probefahrt', 'formCode=lr-td-at-de', '7e866cb8556c4700ba5a0d04b531bd66'],
+    ['landrover-at.at/kmi', 'formCode=lr-kmi-at-de', '048b8d211706450f89b92d32f87ff91d']
+  ];
+
+  var conditionalMappings = [
+    [
+      'jaguarlandrover.emsecure.net/optiext/optiextension.dll',
+      function() {
+        return document.querySelector('title').text.toLowerCase() == 'bedankt';
+      },
+     'b2d8e0fe1911485b8a61c20872402428'
+    ]
+  ];
+
+  dxUpx();
+})();
