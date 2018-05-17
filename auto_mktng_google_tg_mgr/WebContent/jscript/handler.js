@@ -32,74 +32,32 @@ var selsMustTrap = [ // "ReadyToGoBar\:https\:\/\/rules\.config\.landrover\.com\
 	];
 
 
+function genericClickHandler(evt) {	    	
+    msg("enrico click by a " + event.target.nodeName + " element.");
+	evt.preventDefault(); // try to prevent navigating away    	    	
+	target = evt.target;
+	msg("event target: element"+target +" ID="+target.id+" class ="+target.class);
+	clickMatches(target,selsMustTrap,true);	
+    return false;    		
+}
 
 
+var codeToExecute = function() {
 
+	jQuery(document).ready(function(){    		
+	    $(document).on('click',genericClickHandler);
+	});
+};
+
+
+/* Load jQuery
+ * */
 (function(){
-    var codeToExecute = function(){
-
-    	
-    	/** ******************** */
-        // YOUR CODE HERE
-    	
- 
-    	/*
-    	 * Exploring how to detect clicks
-    	 * el: should be evt.target
-    	 * */
-    	function clickMatches(el, sels, dump = true) {
-    			    		    		
-    		for (i = 0; i < sels.length; i++) {
-    			if (sels[i].charAt(0) == '.' || sels[i].charAt(0) == '.') 
-    				escSel = sels[i].charAt(0)+jQuery.escapeSelector(sels[i].substring(1, sels[i].length-1));
-    			else 
-    				escSel = jQuery.escapeSelector(sels[i]);
-
-    			// is: does NOT catch descendands, exact 
-    			if (jQuery(escSel).is(el)) {
-    				console.log("selector: "+escSel+" is '"+el.id+"'");
-    			}
-    			if (jQuery(el).is(jQuery(escSel))) {
-    				console.log("selector: "+escSel+" is '"+el.id+"'");
-    			}
-
-    			// has: should catch descendants, ancestor.has(potentialDescendant)   
-    			if (jQuery(escSel).has(el)) {
-    				console.log("selector: "+escSel+" has '"+el.id+"'");
-    			}
-    			if (jQuery(el).has($(escSel))) {
-    				console.log("selector: "+escSel+" has '"+el.id+"' reversed");
-    			}
-
-    			return true;
-    		}
-    	}
-
-
-    	function genericClickHandler(evt) {	    	
-	        msg("enrico click by a " + event.target.nodeName + " element.");
-	    	evt.preventDefault(); // try to prevent navigating away    	    	
-    		target = evt.target;
-    		msg("event target: element"+target +" ID="+target.id+" class ="+target.class);
-    		clickMatches(target,selsMustTrap,true);	
-	        return false;    		
-    	}
-    	
-    	
-    	jQuery(document).ready(function(){    		
-    	    $(document).on('click',genericClickHandler);
-    	});
-
-
-        /** ******************** */
-        console.log('added JQuery, and maybe some event detection');
-    };
-
     var intervalInt = window.setInterval(function(){
         if(typeof jQuery !== 'undefined' && jQuery){
+            // console.log('added JQuery, and maybe some event detection');
             // Clear this interval
             window.clearInterval(intervalInt);
-
             codeToExecute();
         }
     }, 100);
