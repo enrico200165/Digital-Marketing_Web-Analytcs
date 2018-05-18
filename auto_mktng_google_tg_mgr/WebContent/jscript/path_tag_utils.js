@@ -12,9 +12,9 @@ function buildPath(e)  {
 	pars.reverse();
 
 	positions = pars.map(function(x) { return $(x).index();});
-	els = pars.map(function(x) { return x.tagName; }); msg("elements: "+els, (new Error()).lineNumber);
-	ids = pars.map(function(x) { return x.id; }); msg("ids: "+ids);
-	classes = pars.map(function(x) { return x.classname; }); msg("classes: "+classes);
+	els = pars.map(function(x) { return x.tagName; }); // msg("elements: "+els, (new Error()).lineNumber);
+	ids = pars.map(function(x) { return x.id; }); // msg("ids: "+ids);
+	classes = pars.map(function(x) { return x.classname; }); // msg("classes: "+classes);
 	
 	elAttrs = []; // vector of dictionaries
 	for (i = 0; i < pars.length; i++) {
@@ -44,6 +44,7 @@ function buildPath(e)  {
 	for (i = 0; i < pars.length; i++) {
 		
 		// ID, if present stop, for this ith component
+		// selector += (ids[i] ? ("#"+jQuery.escapeSelector(ids[i])) : "");
 		selector += (ids[i] ? ("#"+ids[i]) : "");
 		if (ids[i]) {
 			selector += " "; // probably not necessary, just keep for now
