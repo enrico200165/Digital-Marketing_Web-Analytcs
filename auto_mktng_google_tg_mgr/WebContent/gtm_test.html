@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <html>
 <head>
+<script type="text/javascript" src="./jscript/log4javascript.js"></script>
+<script type="text/javascript">	var log = log4javascript.getDefaultLogger(); </script>
 <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.js"></script>
-<script>
-function ev_m(m) { console.log("enrico: "+m);}
-</script>
 <script src = "./jscript/globals.js"></script>
+<script src = "./jscript/path_tag_utils.js"></script>
 <script src = "./jscript/gtm_dl.js"></script>
 <script src = "./jscript/gtm_snippet.js"></script>
 <script src = "./jscript/handlers.js"></script>
@@ -13,6 +13,10 @@ function ev_m(m) { console.log("enrico: "+m);}
 <link rel="stylesheet" type="text/css" href="gtm_test.css">
 </head>
 <body>
+<!-- Google Tag Manager (noscript) -->
+<noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-WBD3G77"
+height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+<!-- End Google Tag Manager (noscript) -->
 
 <h1>dummy start page</h1>
 
@@ -26,16 +30,6 @@ originary hostname: https://lrdx-gb-preview.jlr.clients.tahzoo.net
 </div> 
 <br /><br />
 </div>
-
-
-
-<script>
-escSel = "#"+$.escapeSelector("ReadyToGoBar:https://rules.config.landrover.com/jdxl/en_gb/l550");
-console.log("all elemens that match the selector "+ escSel+"\n"+$(escSel))
-</script>
-
-
-
 
 <h1>sparse click testing</h1>
 
@@ -56,7 +50,7 @@ console.log("all elemens that match the selector "+ escSel+"\n"+$(escSel))
 <div id = "div02" class = "shade" >
 	<br />
 	<span id = "span02" class="spanclass">
-		<button type="button" id="button02">Click Me! 02</button>
+		<button type="button" id="button02" attr1="valattr1" attr2 = "valattr2">Click Me! 02 (with attributes)</button>
 	</span>
 	<br />	<br />
 </div>

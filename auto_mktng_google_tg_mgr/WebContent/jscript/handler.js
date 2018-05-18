@@ -1,38 +1,19 @@
-function msg(m) { console.log("##enrico: "+m) }
 
-function buildPath(e)  {
-
-	var pars = $(e).parents();
-	
-	els = pars.map(function() { return this.tagName; }).get().reverse();
-	msg("elements: "+els);
-	ids = pars.map(function() { return this.id; }).get().reverse();
-	msg("ids: "+ids);
-	classes = pars.map(function() { return this.classname; }).get().reverse();
-	msg("classes: "+classes);
-	
-	attrs = [];
-	for (i = 0; i < pars.length; i++) {	
-		elattrs = Object.keys(pars[i].attributes).map(function(key){ return pars[i].attributes[key];});
-	    attrs.push(elattrs);
-	    msg("attr el["+i+"]: "+elattrs);
-	}
-	return true;
-}
 
 
 function genericClickHandler(evt) {	    	
-    // msg("enrico click by a " + event.target.nodeName + " element.");
 	evt.preventDefault(); // try to prevent navigating away    	    	
 	target = evt.target;
-	//msg("event target: element"+target +" ID="+target.id+" class ="+target.class);
-	clickMatches(target,selsMustTrap,true);	
+	clickMatches(target,selsMustTrap,true);
+	buildPath(target);
     return false;    		
 }
 
 
 var codeToExecute = function() {
-
+	
+	dumpDataLayer();
+	
 	jQuery(document).ready(function(){    		
 	    $(document).on('click',genericClickHandler);
 	});
@@ -52,7 +33,3 @@ var codeToExecute = function() {
         }
     }, 100);
 })();
-
-
-
-
