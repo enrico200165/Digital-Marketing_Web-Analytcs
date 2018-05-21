@@ -1,12 +1,16 @@
-/**
- * 
- */
 
+
+
+/** examine path info of event target 
+ * (later on maybe also build a selector)
+* e: event target
+*/
 
 function buildPath(e)  {
 
 	var parsTemp = $(e).parents();
 	
+	// get list of parents, adjust direction
 	pars = [e];
 	for (i = 0; i < parsTemp.length; i++) { pars.push(parsTemp[i]); }
 	pars.reverse();
@@ -14,8 +18,12 @@ function buildPath(e)  {
 	positions = pars.map(function(x) { return $(x).index();});
 	els = pars.map(function(x) { return x.tagName; }); // msg("elements: "+els, (new Error()).lineNumber);
 	ids = pars.map(function(x) { return x.id; }); // msg("ids: "+ids);
-	classes = pars.map(function(x) { return x.classname; }); // msg("classes: "+classes);
+	classes = pars.map(function(x) { return x.className; }); // msg("classes: "+classes);
+
 	
+	for (deepestIdPos = ids.length;  ids[--deepestIdPos] == null && deepestIdPos >=0; ) {}
+    msg(deepestIdPos);
+		
 	elAttrs = []; // vector of dictionaries
 	for (i = 0; i < pars.length; i++) {
 
@@ -31,8 +39,12 @@ function buildPath(e)  {
 		dumpMsg = "atributes of ...<"+els[i]+">";
 		ithTagAttributes = {};
 		for (attrIdx = 0; attrIdx < elattrs.length; attrIdx++) {
-			name = elattrs[attrIdx].name; value = elattrs[attrIdx].value;
-			ithTagAttributes[name] = value; // dumpMsg += " "+name+"= '"+value+"',";
+			name = elattrs[attrIdx].name;
+			if (name.toLowerCase() == "class" || name.toLowerCase() == "id") {
+				continue; // process elsewhere in this fnc
+			}
+			value = elattrs[attrIdx].value;
+			ithTagAttributes[name] = '\"'+value+'\"'; // dumpMsg += " "+name+"= '"+value+"',";
 		}
 		elAttrs[i] = ithTagAttributes;  // msg(dumpMsg);
 		
@@ -40,23 +52,29 @@ function buildPath(e)  {
 		
 	}
 	
-	selector = "";
+	
+	// --- build selector, will NOT work because too complex ---
+	// that's ok, I want all the info, then manually I choose/build it
+	selector = ""; 
 	for (i = 0; i < pars.length; i++) {
+
+		// tags RECOMMENDED AGAINST
+		selector += els[i].toLowerCase(); // tag
 		
 		// ID, if present stop, for this ith component
 		// selector += (ids[i] ? ("#"+jQuery.escapeSelector(ids[i])) : "");
 		selector += (ids[i] ? ("#"+ids[i]) : "");
 		if (ids[i]) {
-			selector += " "; // probably not necessary, just keep for now
-			continue; // TODO restore continue after debugging
+			// selector += " "; // probably not necessary, just keep for now
+			// continue; // TODO restore continue after debugging
+		}
+				
+		// classes
+		if (classes[i] != null && classes[i].length >0)  {
+			clss = classes[i].replace(" ", ".");
+			selector += ("."+clss);
 		}
 		
-		selector += els[i].toLowerCase(); // tag
-		
-		noChild = (new Set()).add("html").add("body");
-		if (!noChild.has( els[i].toLowerCase()))  {
-			selector += ":nth-child("+positions[i]+")";
-		}
 		
 		// attributes
 		if ((attrs = elAttrs[i])) {
@@ -65,7 +83,14 @@ function buildPath(e)  {
 				selector += "["+keys[k]+"="+attrs[keys[k]]+"]";
 			}
 		}
+
 		
+		// add child position
+		noChild = (new Set()).add("html").add("body");
+		if (!noChild.has( els[i].toLowerCase()))  {
+			selector += ":nth-child("+positions[i]+")";
+		}
+				
 		if (i <=  pars.length) {selector += " > ";}
 	}
     msg("selector: "+selector);
